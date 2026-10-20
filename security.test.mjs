@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {createHmac} from 'node:crypto';
+import {authenticate,isAdmin} from '../lib/auth.js';
+export function signed(user={id:123,first_name:'Аня'},date=2000000000){const p=new URLSearchParams({user:JSON.stringify(user),auth_date:String(date),query_id:'hello'});const secret=createHmac('sha256','WebAppData').update('test-token').digest();const hash=createHmac('sha256',secret).update([...p.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${k}=${v}`).join('\n')).digest('hex');p.set('hash',hash);return p.toString();}
+test('valid Telegram HMAC and identity',()=>assert.equal(authenticate(signed(),'test-token',2000000000).id,123));
+test('tampered user, expired/future sessions, duplicate keys and missing token rejected',()=>{for(const raw of [signed().replace('123','999'),signed({id:123},1999990000),signed({id:123},2000000200),signed()+'&auth_date=2000000000',''])assert.throws(()=>authenticate(raw,'test-token',2000000000));assert.throws(()=>authenticate(signed(),''));});
+test('admin closed by default and based on verified ID',()=>{delete process.env.ADMIN_TELEGRAM_ID;assert.equal(isAdmin({id:123}),false);process.env.ADMIN_TELEGRAM_ID='999';assert.equal(isAdmin({id:123}),false);assert.equal(isAdmin({id:999}),true);delete process.env.ADMIN_TELEGRAM_ID;});
