@@ -15,7 +15,7 @@ try{
  let state=emptyState();state.studio='Pearl';state.services=JSON.parse(await readFile('sql/catalog.json','utf8'));state.settings.address='Тестовый адрес';
  const day=DateTime.now().setZone('Europe/Samara').plus({days:4}).toISODate();state.slots[day]=['10:00','12:00','14:00','16:00','18:00'];
  const user={id:123,first_name:'Аня'};
- await context.addInitScript(()=>{window.Telegram={WebApp:{initData:'test-only-browser-fixture',ready(){},expand(){},setHeaderColor(){},setBackgroundColor(){},HapticFeedback:{selectionChanged(){},notificationOccurred(){}}}};});
+ await context.addInitScript(()=>{window.telegramLinks=[];window.Telegram={WebApp:{openTelegramLink(url){window.telegramLinks.push(url);},initData:'test-only-browser-fixture',ready(){},expand(){},setHeaderColor(){},setBackgroundColor(){},HapticFeedback:{selectionChanged(){},notificationOccurred(){}}}};});
  await context.route('**/*',async route=>{
   const req=route.request(),url=new URL(req.url());
   if(url.origin!=='http://localhost:3099')return route.abort();
@@ -52,6 +52,31 @@ try{
  await page.locator('#sbg').click({position:{x:5,y:5}});await page.locator('.tb').filter({hasText:'Записи'}).click();await page.locator('#fab').click();
  await page.locator('#nbN').fill('Мария');await page.locator('#nbP').fill('+79002223344');await page.getByRole('button',{name:'Записать',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.bookings.filter(b=>b.status==='new').length,1);
  assert.equal(await page.locator('img[onerror]').count(),0);assert.deepEqual(errors,[]);
- console.log('UI PASS: booking, move, cancel, admin tabs, expense, settings, photo upload, manual booking; no JS errors or injected elements');
+ // Real button handlers: manual contact phone fallback, verified username,
+ // profile contact, and self-record feedback (no broken deep-link navigation).
+ await page.evaluate(()=>{closeSheet();atab='today';go('admin');});
+ await page.getByRole('button',{name:'Написать',exact:true}).click();
+ assert.equal((await page.evaluate(()=>window.telegramLinks)).at(-1),'https://t.me/+79002223344');
+ const other=reserve(state,{date:day,time:'16:00',serviceId:1,name:'Клиентка',phone:'+79005556677',requestId:crypto.randomUUID()},{id:456,username:'client_verified'}).booking;version++;
+ await page.reload();await page.locator('#loading').waitFor({state:'hidden'});await page.locator('#admBtn').click();
+ await page.evaluate(id=>bookInfo(id),other.id);await page.getByRole('button',{name:'Telegram',exact:true}).click();
+ assert.equal((await page.evaluate(()=>window.telegramLinks)).at(-1),'https://t.me/client_verified');
+ await page.evaluate(()=>clientInfo('+79005556677'));await page.getByRole('button',{name:'Telegram',exact:true}).click();
+ assert.equal((await page.evaluate(()=>window.telegramLinks)).at(-1),'https://t.me/client_verified');
+ const before=(await page.evaluate(()=>window.telegramLinks)).length;
+ await page.evaluate(()=>contactTelegram(DB.bookings.find(b=>b.tgId===SESSION.user.id).id));
+ assert.equal((await page.evaluate(()=>window.telegramLinks)).length,before);
+ assert.equal(await page.locator('a[href^="tg://"]').count(),0);assert.deepEqual(errors,[]);
+ 
+ // The same single field supports a Telegram-only client; no phone call links.
+ admin=false;await page.reload();await page.locator('#loading').waitFor({state:'hidden'});
+ await page.locator('#mainBtn').click();await page.locator('.tm').filter({hasText:'18:00'}).click();await page.locator('#mainBtn').click();await page.locator('.sc').first().click();await page.locator('#mainBtn').click();
+ assert.equal(await page.locator('label[for=cPhone]').innerText(),'Телефон или Telegram');
+ await page.locator('#cPhone').fill('@Telegram_Only');await page.locator('#mainBtn').click();await page.locator('#s-ok.on').waitFor();
+ const tgOnly=state.bookings.find(b=>b.phone==='@telegram_only');assert.ok(tgOnly);assert.equal(tgOnly.tgUsername,'telegram_only');
+ admin=true;await page.reload();await page.locator('#loading').waitFor({state:'hidden'});await page.locator('#admBtn').click();await page.evaluate(id=>bookInfo(id),tgOnly.id);
+ assert.equal(await page.locator('#sheetC a[href^="tel:"]').count(),0);assert.ok((await page.locator('#sheetC').innerText()).includes('@telegram_only'));
+ await page.evaluate(()=>clientInfo('@telegram_only'));await page.locator('#sheetC textarea').fill('Заметка для Telegram-клиентки');await page.locator('#sheetC textarea').press('Tab');await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.notes['@telegram_only'],'Заметка для Telegram-клиентки');assert.deepEqual(errors,[]);
+ console.log('UI PASS: booking, move, cancel, admin tabs, expense, settings, photo upload, manual booking; Telegram contacts (phone, username, self), no JS errors or injected elements');
  console.log('Actions:',actions.join(', '));
 }finally{await browser?.close();server.kill();}

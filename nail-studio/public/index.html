@@ -275,7 +275,7 @@ textarea{width:100%;padding:14px 16px;border-radius:18px;border:1.5px solid tran
 <section class="screen" id="s-form">
   <div class="bt"><button class="back glass" onclick="go('svc')">←</button><div class="dots"><i></i><i></i><i class="on"></i></div></div>
   <div class="bh">Последний шаг</div><div class="bs">Куда прислать подтверждение</div>
-  <input id="cName" placeholder="Ваше имя"><input id="cPhone" placeholder="Телефон" type="tel">
+  <input id="cName" placeholder="Ваше имя"><label for="cPhone">Телефон или Telegram</label><input id="cPhone" placeholder="Номер телефона или @username" type="text" inputmode="text" autocapitalize="off" spellcheck="false" maxlength="200">
   <div class="sum glass" id="summary"></div>
 </section>
 

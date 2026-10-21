@@ -40,5 +40,5 @@ export default async function handler(req,res){
    if(!r.ok)throw new HttpError(502,'Не удалось загрузить фото');return res.status(200).json({url:`${root}/storage/v1/object/public/works/${path}`});
   }
   throw new HttpError(404,'Не найдено');
- }catch(e){const status=e instanceof z.ZodError?400:e.status||500;if(status===500)console.error('API error',e.code||e.name);res.status(status).json({error:e instanceof z.ZodError?'Проверь поля: '+e.issues.map(i=>i.path.join('.')).join(', '):status===500?'Сервис временно недоступен. Попробуй ещё раз':e.message});}
+ }catch(e){const status=e instanceof z.ZodError?400:e.status||500;if(status===500)console.error('API error',e.code||e.name);res.status(status).json({error:e instanceof z.ZodError?'Проверь поля: '+e.issues.map(i=>i.path[0]==='phone'?'номер телефона или Telegram в формате @username':i.path.join('.')).join(', '):status===500?'Сервис временно недоступен. Попробуй ещё раз':e.message});}
 }

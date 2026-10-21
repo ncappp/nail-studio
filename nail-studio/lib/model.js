@@ -6,10 +6,19 @@ const text=(max=200)=>z.string().trim().max(max);
 const id=z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 export const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>DateTime.fromISO(v).isValid);
 export const time=z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
-export const phone=z.string().transform(v=>v.replace(/[\s()-]/g,'')).pipe(z.string().regex(/^\+?[1-9]\d{6,14}$/));
+// Keep the historical `phone` key so existing bookings/client notes remain compatible.
+const contactPattern=/^(?:\+?[1-9]\d{6,14}|@[a-zA-Z0-9_]{1,32})$/;
+export const phone=z.string().max(200).transform((value,ctx)=>{
+ let contact=value.trim();
+ const link=contact.match(/^(?:https?:\/\/)?t\.me\/([a-zA-Z0-9_]{1,32})\/?$/i);
+ if(link)contact='@'+link[1];
+ contact=contact.startsWith('@')?contact.toLowerCase():contact.replace(/[\s()-]/g,'');
+ if(!contactPattern.test(contact)){ctx.addIssue({code:'custom',message:'Укажи номер телефона или Telegram в формате @username'});return z.NEVER;}
+ return contact;
+});
 export const bookingInput=z.object({date,time,serviceId:id,name:text(100).min(1),phone,requestId:z.string().uuid()});
 const service=z.object({id,name:text(150).min(1),price:z.number().finite().min(0).max(1000000),dur:z.number().int().min(5).max(720),img:z.number().int().nonnegative().max(100000),popular:z.boolean().optional()});
-export const configSchema=z.object({studio:text(100).min(1),services:z.array(service).max(100).refine(a=>new Set(a.map(x=>x.id)).size===a.length),slots:z.record(date,z.array(time).max(96)),expenses:z.array(z.object({id,cat:text(60).min(1),amount:z.number().positive().max(100000000),note:text(500),date})).max(20000),cats:z.array(text(60).min(1)).max(50),photos:z.array(z.string().url().max(1000)).max(60),reviews:z.array(z.tuple([text(100),text(1000)])).max(100),notes:z.record(z.string().regex(/^\+?[1-9]\d{6,14}$/),text(2000)),settings:z.object({address:text(300),hours:text(200),tpl:z.array(time).max(96),timezone:z.string().refine(v=>DateTime.now().setZone(v).isValid),dayEnd:time})});
+export const configSchema=z.object({studio:text(100).min(1),services:z.array(service).max(100).refine(a=>new Set(a.map(x=>x.id)).size===a.length),slots:z.record(date,z.array(time).max(96)),expenses:z.array(z.object({id,cat:text(60).min(1),amount:z.number().positive().max(100000000),note:text(500),date})).max(20000),cats:z.array(text(60).min(1)).max(50),photos:z.array(z.string().url().max(1000)).max(60),reviews:z.array(z.tuple([text(100),text(1000)])).max(100),notes:z.record(z.string().regex(contactPattern),text(2000)),settings:z.object({address:text(300),hours:text(200),tpl:z.array(time).max(96),timezone:z.string().refine(v=>DateTime.now().setZone(v).isValid),dayEnd:time})});
 export const emptyState=()=>({studio:'Nail Studio',services:[],slots:{},bookings:[],expenses:[],cats:['Материалы','Аренда','Реклама','Инструменты','Коммуналка','Обучение','Прочее'],photos:[],reviews:[],notes:{},settings:{address:'',hours:'',tpl:['10:00','12:00','14:00','16:00','18:00'],timezone:'Europe/Samara',dayEnd:'21:00'}});
 export function instant(d,t,zone){const v=DateTime.fromISO(`${d}T${t}`,{zone});if(!v.isValid||v.toFormat('HH:mm')!==t)throw new HttpError(400,'Некорректная дата или время');return v.toMillis();}
 export function fits(state,d,t,dur,ignore=null,now=Date.now()){
@@ -23,7 +32,7 @@ export function reserve(state,input,user,{admin=false,now=Date.now()}={}) {
  if(!admin&&state.bookings.filter(b=>b.tgId===user.id&&b.status==='new'&&b.startMs>now).length>=5)throw new HttpError(429,'У тебя уже есть 5 предстоящих записей');
  if(!fits(state,v.date,v.time,s.dur,null,now))throw new HttpError(409,'Время уже занято или услуга не помещается. Выбери другое окошко');
  const startMs=instant(v.date,v.time,state.settings.timezone);
- const b={...v,id:randomInt(1,281474976710655),tgId:admin?null:user.id,createdBy:user.id,service:s.name,price:s.price,dur:s.dur,startMs,endMs:startMs+s.dur*60000,status:'new',manual:admin,revision:1};
+ const b={...v,id:randomInt(1,281474976710655),tgId:admin?null:user.id,tgUsername:v.phone.startsWith('@')?v.phone.slice(1):!admin&&/^[a-zA-Z0-9_]{1,32}$/.test(user.username||'')?user.username:null,createdBy:user.id,service:s.name,price:s.price,dur:s.dur,startMs,endMs:startMs+s.dur*60000,status:'new',manual:admin,revision:1};
  state.bookings.push(b);return {booking:b,created:true};
 }
 export function changeBooking(state,id,action,input,user,{admin=false,now=Date.now()}={}){

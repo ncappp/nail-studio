@@ -7,6 +7,27 @@ const addDays=(s,n)=>DT.fromISO(s,{zone:DB.settings.timezone}).plus({days:n}).to
 const $=id=>document.getElementById(id);
 const haptic=(t='selection')=>{try{t==='selection'?tg.HapticFeedback.selectionChanged():tg.HapticFeedback.notificationOccurred(t)}catch(e){}};
 const nowT=()=>DT.now().setZone(DB.settings.timezone).toFormat('HH:mm');
+// Telegram contact navigation: IDs identify bookings, usernames/phones open chats.
+const isPhoneContact=value=>/^\+?[1-9]\d{6,14}$/.test(String(value||'').replace(/[\s()-]/g,''));
+function telegramContactUrl(contact){
+ const username=String(String(contact.phone||'').startsWith('@')?contact.phone:contact.tgUsername||'').replace(/^@/,'');
+ if(/^[a-zA-Z0-9_]{1,32}$/.test(username))return 'https://t.me/'+username;
+ const raw=String(contact.phone||'').replace(/[\s()-]/g,'');
+ if(/^\+?[1-9]\d{6,14}$/.test(raw))return 'https://t.me/+'+raw.replace(/^\+/,'');
+ return null;
+}
+function contactTelegram(id){
+ const b=DB.bookings.find(x=>x.id===id);if(!b)return;
+ if(b.tgId&&b.tgId===SESSION?.user.id)return alert('Это запись с твоего Telegram-аккаунта. Проверь кнопку на записи с другого аккаунта.');
+ const link=telegramContactUrl(b);if(!link)return alert('Нет Telegram username или корректного телефона клиентки.');
+ if(!b.tgUsername&&!confirm('Открыть Telegram по номеру телефона? Поиск сработает, если этот номер привязан к Telegram и клиентка разрешает находить её по номеру.'))return;
+ haptic();try{if(tg?.openTelegramLink)tg.openTelegramLink(link);else window.open(link,'_blank','noopener,noreferrer');}catch{alert('Не удалось открыть Telegram. Попробуй найти клиентку по username или телефону.');}
+}
+function clientTelegram(phone){
+ const records=DB.bookings.filter(b=>b.phone===phone).sort((a,b)=>(b.startMs||0)-(a.startMs||0));
+ const contact=records.find(b=>b.tgUsername)||records.find(b=>b.tgId)||records[0];if(contact)contactTelegram(contact.id);
+}
+
 let DB={studio:'Nail Studio',services:[],slots:{},bookings:[],expenses:[],cats:[],photos:[],reviews:[],notes:{},settings:{address:'',hours:'',tpl:[],timezone:'Europe/Samara',dayEnd:'21:00'}};
 let SESSION=null,VERSION=0,working=false;
 const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -74,7 +95,7 @@ function renderForm(){
  if(!$('cName').value)$('cName').value=SESSION?.user.first_name||'';
  $('summary').innerHTML=`<div class="top"><img src="${pimg(s)}"><div><b>${escapeHtml(s.name)}</b><span>${B.date}, ${B.time}</span></div></div><div class="rw"><span>Длительность</span><b>${s.dur} мин</b></div><div class="rw"><span>Адрес</span><b>${escapeHtml(DB.settings.address)}</b></div><div class="rw tot"><span>К оплате</span><b>${fmt(s.price)}</b></div>`;
  cta('Подтвердить запись',async()=>{
-  const name=$('cName').value.trim(),phone=$('cPhone').value.trim();if(!name||!phone)return alert('Укажи имя и телефон');
+  const name=$('cName').value.trim(),phone=$('cPhone').value.trim();if(!name||!phone)return alert('Укажи имя и номер телефона или Telegram');
   B.requestId??=crypto.randomUUID();
   await mutation(async()=>{const b=await api('book',{date:B.date,time:B.time,serviceId:s.id,name,phone,requestId:B.requestId});
    $('okText').textContent=`${b.date}, ${b.time} · ${escapeHtml(b.service)}. Запись сохранена. Напоминания придут в Telegram, если ты разрешила сообщения боту.`;await refresh().catch(()=>{});B={};go('ok');confetti();haptic('success');});
@@ -134,7 +155,7 @@ function aToday(P){
   const pend=DB.bookings.filter(b=>b.status==='new'&&(b.date<t||(b.date===t&&b.time<nowT()))).length;
   P.innerHTML=`<div class="kpis"><div class="kpi pk">Записей сегодня<b>${tb.length}</b></div><div class="kpi">Ожидаемо за день<b>${fmt(exp)}</b></div></div>
   ${nx?`<div class="h3">Следующая</div><div class="next"><small>${rel(nx.date)}, ${dfmt(nx.date,{weekday:'long'})}</small><div class="tm2">${nx.time}</div><div class="who">${escapeHtml(nx.name)}</div><div class="what">${escapeHtml(nx.service)} · ${fmt(nx.price)}</div>
-   <div class="acts"><a class="b-ok" href="tel:${nx.phone}">Позвонить</a>${nx.tgId?`<a class="b-ghost" href="tg://user?id=${nx.tgId}">Написать</a>`:''}<button class="b-ghost" onclick="bookInfo(${nx.id})">Подробнее</button></div></div>`:''}
+   <div class="acts">${isPhoneContact(nx.phone)?`<a class="b-ok" href="tel:${nx.phone}">Позвонить</a>`:''}${telegramContactUrl(nx)?`<button class="b-ghost" onclick="contactTelegram(${nx.id})">Написать</button>`:''}<button class="b-ghost" onclick="bookInfo(${nx.id})">Подробнее</button></div></div>`:''}
   ${pend?`<div class="card" style="display:flex;align-items:center;gap:12px;cursor:pointer" onclick="atab='book';bf='pend';render()"><div class="av" style="width:40px;height:40px">!</div><div style="flex:1"><b style="font-size:14px">Отметьте визиты</b><div class="mut">${pend} ${pend===1?'запись ждёт':pend<5?'записи ждут':'записей ждут'} статуса «пришла / не пришла»</div></div>→</div>`:''}
   <div class="h3">План на сегодня <a onclick="atab='slots';calD='${t}';render()">${free} своб.</a></div>
   ${tb.length?`<div class="tl2">${tb.map(b=>`<div class="it" style="--sc:${ST[b.status][1]}"><div class="t">${b.time}</div><div class="bk" onclick="bookInfo(${b.id})"><div class="av">${ini(b.name)}</div><div class="m"><b>${escapeHtml(b.name)}</b><span>${escapeHtml(b.service)}</span></div><div class="r"><b>${fmt(b.price)}</b>${pill(b.status)}</div></div></div>`).join('')}</div>`:`<div class="card empty">Сегодня записей нет.<br>Можно отдохнуть ☕</div>`}
@@ -153,9 +174,9 @@ function aBook(P){
 function bookInfo(id){
   const b=DB.bookings.find(x=>x.id===id),c=clients().find(x=>x.phone===b.phone);
   openSheet(`<div style="display:flex;gap:12px;align-items:center;margin-bottom:14px"><div class="av" style="width:52px;height:52px;font-size:18px">${ini(b.name)}</div><div><h2 style="margin:0">${escapeHtml(b.name)}</h2><span class="ctag ${ctag(c)[1]}" style="margin:0">${ctag(c)[0]}</span> <span class="mut">визитов: ${c.visits}</span></div></div>
-  <div class="kv"><span>Дата</span><b>${dfmt(b.date,{weekday:'short',day:'numeric',month:'long'})}, ${b.time}</b></div><div class="kv"><span>Услуга</span><b>${escapeHtml(b.service)}</b></div><div class="kv"><span>Стоимость</span><b>${fmt(b.price)}</b></div><div class="kv"><span>Телефон</span><b>${b.phone}</b></div>
+  <div class="kv"><span>Дата</span><b>${dfmt(b.date,{weekday:'short',day:'numeric',month:'long'})}, ${b.time}</b></div><div class="kv"><span>Услуга</span><b>${escapeHtml(b.service)}</b></div><div class="kv"><span>Стоимость</span><b>${fmt(b.price)}</b></div><div class="kv"><span>Контакт</span><b>${b.phone}</b></div>
   <label style="margin-top:16px">Статус</label><div class="stb">${Object.entries(ST).map(([k,v])=>`<button class="${b.status===k?'on':''}" style="color:${v[1]};background:${v[2]}" onclick="setSt(${b.id},'${k}')">${v[0]}</button>`).join('')}</div>
-  <div class="btns"><a class="btn light" href="tel:${b.phone}">Позвонить</a>${b.tgId?`<a class="btn light" href="tg://user?id=${b.tgId}">Telegram</a>`:''}<button class="btn light" onclick="clientInfo('${b.phone}')">Карточка</button></div>
+  <div class="btns">${isPhoneContact(b.phone)?`<a class="btn light" href="tel:${b.phone}">Позвонить</a>`:''}${telegramContactUrl(b)?`<button class="btn light" onclick="contactTelegram(${b.id})">Telegram</button>`:''}<button class="btn light" onclick="clientInfo('${b.phone}')">Карточка</button></div>
   <button class="btn red" style="margin-top:8px" onclick="if(confirm('Удалить запись?')){removeBooking(${b.id})}">Удалить запись</button>`);
 }
 async function setSt(id,status){await mutation(async()=>{await api('change',{id,action:'status',status});await refresh();render();bookInfo(id);haptic('success');});}
@@ -163,7 +184,7 @@ async function removeBooking(id){await mutation(async()=>{await api('delete',{id
 let manualRequestId=null;
 function bookSheet(){manualRequestId=crypto.randomUUID();
   const days=Object.keys(DB.slots).filter(d=>d>=today()&&freeTimes(d).length).sort();
-  openSheet(`<h2>Новая запись</h2><label>Клиентка</label><input id="nbN" placeholder="Имя" list="cl"><datalist id="cl">${clients().map(c=>`<option value="${escapeHtml(c.name)}">`).join('')}</datalist><input id="nbP" placeholder="Телефон" type="tel">
+  openSheet(`<h2>Новая запись</h2><label>Клиентка</label><input id="nbN" placeholder="Имя" list="cl"><datalist id="cl">${clients().map(c=>`<option value="${escapeHtml(c.name)}">`).join('')}</datalist><label for="nbP">Телефон или Telegram</label><input id="nbP" placeholder="Номер телефона или @username" type="text" autocapitalize="off" spellcheck="false" maxlength="200">
   <label>Услуга</label><select id="nbS" onchange="nbTimes()">${DB.services.map(s=>`<option value="${s.id}">${escapeHtml(s.name)} — ${fmt(s.price)}</option>`).join('')}</select>
   <label>Когда</label><div class="flex"><select id="nbD" onchange="nbTimes()">${days.map(d=>`<option value="${d}">${dfmt(d,{weekday:'short',day:'numeric',month:'short'})}</option>`).join('')}</select><select id="nbT"></select></div>
   ${days.length?'':'<p class="mut">Нет свободных окошек — сначала добавьте их во вкладке «Окошки»</p>'}
@@ -234,7 +255,7 @@ function aClients(P){
   const q=cq.toLowerCase(),list=all.filter(SEG[cseg][1]).filter(c=>!q||c.name.toLowerCase().includes(q)||c.phone.includes(q)).sort((a,b)=>b.sum-a.sum);
   const ret=all.length?Math.round(all.filter(c=>c.visits>=2).length/all.length*100):0;
   P.innerHTML=`<div class="kpis" style="margin-bottom:12px"><div class="kpi pk">Всего клиенток<b>${all.length}</b></div><div class="kpi">Возвращаются<b>${ret}%</b></div></div>
-  <div class="srch">${IC.srch}<input placeholder="Имя или телефон" value="${escapeHtml(cq)}" oninput="cq=this.value;aClients($('apanel'));const i=$('apanel').querySelector('input');i.focus();i.setSelectionRange(99,99)"></div>
+  <div class="srch">${IC.srch}<input placeholder="Имя, телефон или Telegram" value="${escapeHtml(cq)}" oninput="cq=this.value;aClients($('apanel'));const i=$('apanel').querySelector('input');i.focus();i.setSelectionRange(99,99)"></div>
   <div class="chips">${Object.entries(SEG).map(([k,[v,f]])=>`<div class="chip ${cseg===k?'on':''}" onclick="cseg='${k}';render()">${v}<i>${all.filter(f).length}</i></div>`).join('')}</div>
   ${cseg==='sleep'&&list.length?`<div class="card" style="margin:0 0 10px;font-size:13px;color:var(--ink2)">💌 Напишите им с персональной скидкой — это самый дешёвый способ вернуть клиентку</div>`:''}
   ${list.map(c=>{const t=ctag(c);return `<div class="bk" style="margin-bottom:8px" onclick="clientInfo('${c.phone}')"><div class="av">${ini(c.name)}</div><div class="m"><b>${escapeHtml(c.name)}<span class="ctag ${t[1]}">${t[0]}</span></b><span>${c.visits} ${c.visits%10===1&&c.visits!==11?'визит':c.visits%10>=2&&c.visits%10<=4&&(c.visits<10||c.visits>20)?'визита':'визитов'} · ${c.last?'был'+'а '+(daysSince(c.last)===0?'сегодня':daysSince(c.last)+' дн. назад'):'ещё не была'}</span></div><div class="r"><b>${fmt(c.sum)}</b></div></div>`}).join('')||'<div class="card empty">Никого не нашли</div>'}`;
@@ -243,7 +264,7 @@ function clientInfo(ph){
   const c=clients().find(x=>x.phone===ph),t=ctag(c),fav=Object.entries(c.svc).sort((a,b)=>b[1]-a[1])[0];
   openSheet(`<div style="text-align:center"><div class="av" style="width:68px;height:68px;font-size:24px;margin:0 auto 10px">${ini(c.name)}</div><h2 style="margin-bottom:6px">${escapeHtml(c.name)}</h2><span class="ctag ${t[1]}" style="margin:0">${t[0]}</span><div class="mut" style="margin-top:6px">${c.phone}</div></div>
   <div class="kpis" style="margin-top:16px"><div class="kpi">Визитов<b>${c.visits}</b></div><div class="kpi">Потратила<b>${fmt(c.sum)}</b></div><div class="kpi">Средний чек<b>${fmt(c.visits?c.sum/c.visits:0)}</b></div><div class="kpi">Любит<b style="font-size:14px;line-height:1.3">${escapeHtml(fav?fav[0]:'—')}</b></div></div>
-  <div class="btns"><a class="btn" href="tel:${c.phone}">Позвонить</a>${c.tgId?`<a class="btn light" href="tg://user?id=${c.tgId}">Telegram</a>`:''}</div>
+  <div class="btns">${isPhoneContact(c.phone)?`<a class="btn" href="tel:${c.phone}">Позвонить</a>`:''}${c.phone?`<button class="btn light" onclick="clientTelegram('${c.phone}')">Telegram</button>`:''}</div>
   <label style="margin-top:16px">Заметка</label><textarea placeholder="Аллергии, предпочтения, форма ногтей…" onchange="DB.notes[\`${c.phone}\`]=this.value;save()">${escapeHtml(DB.notes[c.phone]||'')}</textarea>
   <label style="margin-top:12px">История</label>${c.hist.sort((a,b)=>(b.date+b.time).localeCompare(a.date+a.time)).map(b=>`<div class="kv"><span>${dfmt(b.date,{day:'numeric',month:'short',year:'2-digit'})} · ${escapeHtml(b.service)}</span><b>${fmt(b.price)} ${b.status!=='done'?pill(b.status):''}</b></div>`).join('')}`);
 }
