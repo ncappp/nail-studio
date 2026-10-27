@@ -25,7 +25,7 @@ function openTimeEditor(mode,date=null){
 }
 function timeError(message=''){const el=$('timeError');el.textContent=message;el.hidden=!message;$('timeEntry').setAttribute('aria-invalid',String(!!message));return !message;}
 function timeFromPicker(){$('timeEntry').value=$('timeHour').value+':'+$('timeMinute').value;timeError();}
-function syncTimePicker(){const value=normalizeTime($('timeEntry').value);if(value){$('timeHour').value=value.slice(0,2);$('timeMinute').value=value.slice(3);}timeError();}
+function syncTimePicker(){const input=$('timeEntry');if(/^\d{4}$/.test(input.value))input.value=input.value.slice(0,2)+':'+input.value.slice(2);const value=normalizeTime(input.value);if(value){$('timeHour').value=value.slice(0,2);$('timeMinute').value=value.slice(3);}timeError();}
 function formatTimeEntry(){const value=normalizeTime($('timeEntry').value);if(value)$('timeEntry').value=value;}
 function drawTemplateTimes(){
  $('templateTimes').innerHTML=timeEditor.times.map(t=>`<div class="time-chip"><button type="button" class="time-chip-edit" aria-label="Изменить ${t}" onclick="editTemplateTime('${t}')">${t}</button><button type="button" class="time-chip-remove" aria-label="Убрать ${t}" onclick="removeTemplateTime('${t}')">×</button></div>`).join('')||'<p class="mut">Добавь время для кнопки «Весь день».</p>';

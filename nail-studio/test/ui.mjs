@@ -56,7 +56,7 @@ try{
  await page.locator('.ahb button').last().click();await page.locator('#sheetC input').first().fill('Pearl Studio');await page.getByRole('button',{name:'Сохранить',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.studio,'Pearl Studio');await page.locator('.ahb button').last().click();
  const slotsBeforeTemplate=structuredClone(state.slots);
  await page.getByRole('button',{name:'Изменить шаблон',exact:true}).click();
- await page.locator('#timeHour').selectOption('09');await page.locator('#timeMinute').selectOption('15');assert.equal(await page.locator('#timeEntry').inputValue(),'09:15');await page.getByRole('button',{name:'Добавить время',exact:true}).click();
+ await page.locator('#timeHour').selectOption('09');await page.locator('#timeMinute').selectOption('15');assert.equal(await page.locator('#timeEntry').inputValue(),'09:15');await page.locator('#timeEntry').fill('2235');assert.equal(await page.locator('#timeEntry').inputValue(),'22:35');await page.locator('#timeEntry').fill('0915');assert.equal(await page.locator('#timeEntry').inputValue(),'09:15');await page.getByRole('button',{name:'Добавить время',exact:true}).click();
  await page.getByRole('button',{name:'Изменить 12:00',exact:true}).click();await page.locator('#timeEntry').fill('1235');await page.getByRole('button',{name:'Заменить время',exact:true}).click();
  await page.getByRole('button',{name:'Убрать 10:00',exact:true}).click();
  await page.locator('#timeEntry').fill('25:99');await page.getByRole('button',{name:'Добавить время',exact:true}).click();assert.equal(await page.locator('#timeError').isVisible(),true);
