@@ -26,7 +26,7 @@ npm run test:postgres требует TEST_DATABASE_URL на localhost с име�
 
 UI использует фикстуры Telegram/API; SQL-тесты не отправляют реальные сообщения. Работа webhook, реальная доставка, Storage upload и восстановление backups требуют отдельного тестового проекта и Telegram-аккаунтов. Чтение реального Supabase подтвердило приватные таблицы с RLS, настроенный works и активную минутную задачу nail-reminders; это не тест новых миграций на production.
 
-На macOS headless Chromium запускается с --in-process-gpu. Можно указать CHROMIUM_PATH для установленного браузера. В Linux CI браузер устанавливается через Playwright. Тесты не содержат production-секретов.
+На macOS headless Chromium запускается с --in-process-gpu. Можно указать CHROMIUM_PATH для установленного браузера. В Linux CI используется предустановленный Google Chrome runner Ubuntu 24.04; его версия выводится в журнал, браузерный сценарий выполняется полностью. Дополнительная установка Chromium не требуется. Тесты не содержат production-секретов.
 
 ## Воспроизведение
 
