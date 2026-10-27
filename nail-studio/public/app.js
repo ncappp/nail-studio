@@ -95,10 +95,9 @@ function renderSvc(){
 }
 function renderForm(){
  const s=DB.services.find(x=>x.id===B.svc);if(!s)return go('svc');
- if(!$('cName').value)$('cName').value=SESSION?.user.first_name||'';
  $('summary').innerHTML=`<div class="top"><img src="${pimg(s)}"><div><b>${escapeHtml(s.name)}</b><span>${B.date}, ${B.time}</span></div></div><div class="rw"><span>Длительность</span><b>${s.dur} мин</b></div><div class="rw"><span>Адрес</span><b>${escapeHtml(DB.settings.address)}</b></div><div class="rw tot"><span>К оплате</span><b>${fmt(s.price)}</b></div>`;
  cta('Подтвердить запись',async()=>{
-  const name=$('cName').value.trim(),phone=$('cPhone').value.trim();if(!name||!phone)return alert('Укажи имя и номер телефона или Telegram');
+  const name=$('cName').value.trim(),phone=$('cPhone').value.trim();if(!name){$('cName').focus();return alert('Введи своё имя — это обязательное поле');}if(!phone){$('cPhone').focus();return alert('Укажи номер телефона или Telegram');}
   const payload={date:B.date,time:B.time,serviceId:s.id,name,phone},key=JSON.stringify(payload);
   await mutation(async()=>{
    if(B.pending&&B.pending!==key){
@@ -184,6 +183,7 @@ function bookInfo(id){
   openSheet(`<div style="display:flex;gap:12px;align-items:center;margin-bottom:14px"><div class="av" style="width:52px;height:52px;font-size:18px">${ini(b.name)}</div><div><h2 style="margin:0">${escapeHtml(b.name)}</h2><span class="ctag ${ctag(c)[1]}" style="margin:0">${ctag(c)[0]}</span> <span class="mut">визитов: ${c.visits}</span></div></div>
   <div class="kv"><span>Дата</span><b>${dfmt(b.date,{weekday:'short',day:'numeric',month:'long'})}, ${b.time}</b></div><div class="kv"><span>Услуга</span><b>${escapeHtml(b.service)}</b></div><div class="kv"><span>Стоимость</span><b>${fmt(b.price)}</b></div><div class="kv"><span>Контакт</span><b>${b.phone}</b></div>
   <label style="margin-top:16px">Статус</label><div class="stb">${Object.entries(ST).map(([k,v])=>`<button class="${b.status===k?'on':''}" style="color:${v[1]};background:${v[2]}" onclick="setSt(${b.id},'${k}')">${v[0]}</button>`).join('')}</div>
+  <p class="mut status-help">Мастер может менять статус в любое время. «Пришла» учитывается в доходах.</p>
   <div class="btns">${isPhoneContact(b.phone)?`<a class="btn light" href="tel:${b.phone}">Позвонить</a>`:''}${telegramContactUrl(b)?`<button class="btn light" onclick="contactTelegram(${b.id})">Telegram</button>`:''}<button class="btn light" onclick="clientInfo('${b.phone}')">Карточка</button></div>
   ${b.status==='new'?`<button class="btn pk" style="margin-top:8px" onclick="moveSheet(${b.id},true)">Перенести визит</button>`:''}
   <button class="btn red" style="margin-top:8px" ${b.status!=='cancel'?'disabled':''} onclick="if(confirm('Удалить запись?')){removeBooking(${b.id})}">Удалить запись</button>`);
@@ -210,12 +210,12 @@ function aSlots(P){
   const [y,m]=calM.split('-').map(Number),first=new Date(y,m-1,1),off=(first.getDay()+6)%7,dim=new Date(y,m,0).getDate();
   let cells='';for(let i=0;i<off;i++)cells+='<div></div>';
   for(let d=1;d<=dim;d++){const ds=`${calM}-${String(d).padStart(2,'0')}`,sl=DB.slots[ds]||[],bk=DB.bookings.filter(b=>b.date===ds&&b.status!=='cancel').length;
-    cells+=`<div class="c ${ds<t?'past':''} ${sl.length?'has':''} ${ds===calD?'sel':''} ${ds===t?'today':''}" onclick="calD='${ds}';haptic();render()">${d}<em>${sl.length?[...Array(Math.min(3,bk))].map(()=>'<s class="b"></s>').join('')+(sl.length>bk?'<s></s>':''):''}</em></div>`}
+    cells+=`<div data-date="${ds}" class="c ${ds<t?'past':''} ${sl.length?'has':''} ${ds===calD?'sel':''} ${ds===t?'today':''}" onclick="calD='${ds}';haptic();render()">${d}<em>${sl.length?[...Array(Math.min(3,bk))].map(()=>'<s class="b"></s>').join('')+(sl.length>bk?'<s></s>':''):''}</em></div>`}
   const sl=DB.slots[calD]||[],booked=DB.bookings.filter(b=>b.date===calD&&b.status!=='cancel'),bt=booked.map(b=>b.time);
   const all=[...new Set([...DB.settings.tpl,...sl,...bt])].sort();
   P.innerHTML=`<div class="card" style="margin-top:0"><div class="calh2"><button onclick="calShift(-1)">‹</button><span>${first.toLocaleString('ru',{month:'long',year:'numeric'})}</span><button onclick="calShift(1)">›</button></div>
   <div class="calg">${['пн','вт','ср','чт','пт','сб','вс'].map(w=>`<div class="wd">${w}</div>`).join('')}${cells}</div></div>
-  <div class="h3">${dfmt(calD,{weekday:'long',day:'numeric',month:'long'})}<a onclick="addCustomTime()">+ своё время</a></div>
+  <div class="h3">${dfmt(calD,{weekday:'long',day:'numeric',month:'long'})}<button type="button" class="time-link" onclick="addCustomTime()">+ своё время</button></div>
   <div class="slots">${all.map(x=>{const point=DT.fromISO(calD+'T'+x,{zone:DB.settings.timezone}).toMillis(),match=booked.find(q=>point>=q.startMs&&point<q.endMs),b=!!match;return `<div class="sl ${b?'bk2':sl.includes(x)?'on':''}" onclick="${b?`bookInfo(${match.id})`:`toggleSlot('${x}')`}">${x}</div>`}).join('')}</div>
   <div class="legend"><span>Открыто для записи</span><span class="b">Занято</span><span class="o">Закрыто</span></div>
   <div class="btns"><button class="btn light" onclick="fillDay()">Весь день</button><button class="btn light" onclick="clearDay()">Выходной</button></div>
@@ -228,7 +228,7 @@ function toggleSlot(x){const s=new Set(DB.slots[calD]||[]);s.has(x)?s.delete(x):
 function fillDay(){DB.slots[calD]=[...new Set([...(DB.slots[calD]||[]),...DB.settings.tpl])].sort();save();render()}
 function clearDay(){const bt=DB.bookings.filter(b=>b.date===calD&&b.status!=='cancel').map(b=>b.time);if(bt.length){DB.slots[calD]=bt}else delete DB.slots[calD];save();render();if(bt.length)alert('Занятые окошки оставлены — сначала отмените записи')}
 function repeatWeeks(){const s=DB.slots[calD]||[];for(let i=1;i<=4;i++){const d=addDays(calD,7*i);DB.slots[d]=[...new Set([...(DB.slots[d]||[]),...s])].sort();if(!DB.slots[d].length)delete DB.slots[d]}save();haptic('success');render()}
-function addCustomTime(){const x=prompt('Время, например 11:30');if(x&&/^\d{1,2}:\d{2}$/.test(x)){const v=x.padStart(5,'0');const s=new Set(DB.slots[calD]||[]);s.add(v);DB.slots[calD]=[...s].sort();save();render()}}
+function addCustomTime(){openTimeEditor('slot',calD||today());}
 /* ---- Финансы ---- */
 function aFin(P){
   const r=range(period),pr=range(period,1),S=stats(r),Sp=stats(pr);
@@ -290,7 +290,7 @@ function openSettings(){openSheet(`<h2>Настройки</h2>
   <div class="mrow" onclick="auditSheet()">Журнал изменений<span>→</span></div>
   <div class="mrow" onclick="diagnosticsSheet()">Состояние уведомлений<span>→</span></div>
   <label style="margin-top:16px">Студия</label><input value="${escapeHtml(DB.studio)}" placeholder="Название" onchange="DB.studio=this.value;save()"><input value="${escapeHtml(DB.settings.address)}" placeholder="Адрес" onchange="DB.settings.address=this.value;save()"><input value="${escapeHtml(DB.settings.hours)}" placeholder="Часы работы" onchange="DB.settings.hours=this.value;save()">
-  <label>Шаблон рабочего дня</label><input value="${DB.settings.tpl.join(', ')}" onchange="DB.settings.tpl=this.value.split(/[ ,;]+/).filter(x=>/^\\d{1,2}:\\d{2}$/.test(x)).map(x=>x.padStart(5,'0')).sort();save()"><p class="mut" style="margin:-4px 4px 12px">Эти часы подставляются кнопкой «Весь день» в окошках</p>
+  <div class="template-preview"><label>Шаблон рабочего дня</label><div class="time-chips">${DB.settings.tpl.map(t=>`<span class="time-chip">${t}</span>`).join('')||'<span class="mut">Время ещё не добавлено</span>'}</div><button type="button" class="btn light" onclick="openTimeEditor('template')">Изменить шаблон</button><p class="mut">Выбирай часы и минуты или вводи время вручную. Шаблон подставляется кнопкой «Весь день».</p></div>
   <label>Часовой пояс</label><input value="${escapeHtml(DB.settings.timezone)}" onchange="DB.settings.timezone=this.value;save()"><label>Конец рабочего дня</label><input type="time" value="${DB.settings.dayEnd}" onchange="DB.settings.dayEnd=this.value;save()">
   <label for="bufferMinutes">Буфер между визитами, мин</label><input id="bufferMinutes" type="number" min="0" max="120" value="${DB.settings.bufferMinutes||0}" onchange="DB.settings.bufferMinutes=+this.value;save()">
   <label for="masterContact">Контакт мастера</label><input id="masterContact" placeholder="@username или +79001234567" value="${escapeHtml(DB.settings.masterContact||'')}" onchange="DB.settings.masterContact=this.value.trim();save()"><p class="mut">Клиентка сможет связаться с тобой, если отмена через приложение уже закрыта.</p>`)}

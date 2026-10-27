@@ -50,3 +50,18 @@ test('client history has a stable cursor, strips internal keys and exposes no br
  assert.equal(bookingPage(s,{id:99}).bookings.length,0);
  const visible=JSON.stringify(clientView(s,user,{now}));assert.equal(visible.includes('private reason'),false);assert.equal(visible.includes('secret'),false);
 });
+test('master can correct attendance before, during and after a visit, clients cannot',()=>{
+ for(const offset of [-3600000,1800000,4*3600000]){
+  const s=fixture(),b=reserve(s,input(),user,{now}).booking,at=b.startMs+offset;
+  for(const status of ['done','noshow','new'])assert.equal(changeBooking(s,b.id,'status',{status},{id:999},{admin:true,now:at}).status,status);
+ }
+ const s=fixture(),b=reserve(s,input(),user,{now}).booking;
+ assert.throws(()=>changeBooking(s,b.id,'status',{status:'done'},user,{now}),e=>e.status>=400);
+ changeBooking(s,b.id,'cancel',{},user,{now});s.slots={};
+ assert.equal(changeBooking(s,b.id,'status',{status:'new'},{id:999},{admin:true,now:b.endMs+86400000}).status,'new');
+});
+test('master status override still cannot restore a canceled interval occupied by another visit',()=>{
+ const s=fixture(),b=reserve(s,input(),user,{now}).booking;
+ changeBooking(s,b.id,'cancel',{},user,{now});reserve(s,input(),{id:11},{now});
+ for(const status of ['new','done','noshow'])assert.throws(()=>changeBooking(s,b.id,'status',{status},{id:999},{admin:true,now}),e=>e.status===409);
+});

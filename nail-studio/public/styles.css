@@ -226,6 +226,19 @@ body.adm-on .fab.show{display:block}
 .svr .x{display:flex;flex-direction:column;gap:6px}.svr .x button{width:34px;height:34px;border-radius:12px;border:0;background:var(--bg);cursor:pointer;color:var(--ink2)}
 .ph{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.ph div{position:relative}.ph img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px;display:block}.ph button{position:absolute;top:6px;right:6px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(0,0,0,.45);color:#fff;cursor:pointer}
 .mrow{display:flex;align-items:center;gap:12px;padding:15px 14px;border-radius:20px;background:#fff;margin-bottom:8px;cursor:pointer;font-weight:600}.mrow .ic2{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:var(--pink2);color:#C2416A}.mrow span{margin-left:auto;color:var(--mut)}
+.required-mark{color:#C2416A}
+.status-help{margin:10px 4px 14px;line-height:1.5}
+.time-link{border:0;background:none;color:var(--pink);font:inherit;font-size:12px;font-weight:700;cursor:pointer;padding:8px 0 8px 10px;white-space:nowrap}
+.template-preview{margin:12px 0 18px}.template-preview .mut{margin:8px 4px;line-height:1.5}
+.time-chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 16px}
+.time-chip{display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid var(--pink2);border-radius:14px;padding:9px 12px;font-size:15px;font-weight:700;color:var(--ink)}
+.time-chip:has(button){padding:2px 2px 2px 6px}
+.time-chip-edit,.time-chip-remove{border:0;background:none;cursor:pointer;color:var(--ink);font:inherit;padding:10px 6px}
+.time-chip-remove{width:36px;min-height:40px;color:#C2416A;font-size:21px;border-radius:12px}
+.time-picker-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 4px}.time-picker-row>*{min-width:0}
+.time-picker-row select{font-size:22px;font-weight:700;text-align:center;background:#fff;width:100%;min-height:56px}
+.time-error{color:#B83254;font-size:13px;line-height:1.5;margin:8px 4px 14px}
+#timeHint{margin:0 4px 14px;line-height:1.5}
 textarea{width:100%;padding:14px 16px;border-radius:18px;border:1.5px solid transparent;background:#fff;font:14px Manrope,system-ui,sans-serif;color:var(--ink);min-height:80px;outline:none;resize:none}
 .mut{color:var(--mut);font-size:12px}
 .flex{display:flex;gap:8px}.flex>*{flex:1}
