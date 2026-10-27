@@ -82,3 +82,11 @@ test('delivery diagnostics distinguish obsolete jobs, failures and expiration af
  const after=(await diagnostics(admin)).queue;
  assert.equal(after.dead,first.dead);assert.equal(after.expired,first.expired);
 });
+test('authenticated master can set future attendance through the API and it persists',async()=>{
+ const b=(await readState()).data.bookings.find(b=>b.status==='new');assert.ok(b.startMs>Date.now());
+ for(const status of ['done','noshow','new']){
+  const result=await call('change','POST',{'x-telegram-init-data':sign(999)},{id:b.id,action:'status',status});
+  assert.equal(result.code,200);assert.equal((await readState()).data.bookings.find(x=>x.id===b.id).status,status);
+ }
+ assert.equal((await call('change','POST',{'x-telegram-init-data':sign(b.tgId)},{id:b.id,action:'status',status:'done'})).code>=400,true);
+});

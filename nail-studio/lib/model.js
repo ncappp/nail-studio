@@ -55,9 +55,7 @@ export function changeBooking(state,id,action,input,user,{admin=false,now=Date.n
  } else if(action==='cancel') b.status='cancel';
  else if(action==='status'&&admin){
   const status=z.enum(['new','done','noshow','cancel']).parse(input.status);
-  if(['done','noshow'].includes(status)&&b.endMs>now)throw new HttpError(400,'Отметить визит можно после окончания');
   if(b.status==='cancel'&&status!=='cancel'&&state.bookings.some(x=>x.id!==b.id&&x.status!=='cancel'&&b.startMs<x.endMs&&b.endMs>x.startMs))throw new HttpError(409,'Время уже занято другой записью');
-  if(status==='new'&&b.status!=='new'&&!fits(state,b.date,b.time,b.dur,b.id,now))throw new HttpError(409,'Восстановить запись нельзя: время недоступно');
   b.status=status;
  } else throw new HttpError(400,'Неизвестное действие');
  b.revision++;return b;
