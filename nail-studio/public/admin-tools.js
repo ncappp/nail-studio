@@ -25,7 +25,7 @@ async function downloadExport(kind){await mutation(async()=>{
 });}
 async function diagnosticsSheet(){await mutation(async()=>{
  const r=await api('diagnostics'),last=r.worker?.finished_at,age=last?Date.now()-new Date(last).getTime():Infinity;
- openSheet(`<h2>Состояние уведомлений</h2><p>База данных доступна.</p><p>${age<180000?'Планировщик работает.':'Давно не было успешного запуска планировщика. Проверь cron.'}</p><div class="kv"><span>Последний запуск</span><b>${last?escapeHtml(new Date(last).toLocaleString('ru-RU')):'Нет данных'}</b></div><div class="kv"><span>Ожидают отправки</span><b>${r.queue.pending}</b></div><div class="kv"><span>Не доставлены</span><b>${r.queue.dead}</b></div><div class="kv"><span>Просрочены</span><b>${r.queue.expired}</b></div><p class="mut">Проверка не отправляет сообщения и не подтверждает исправность Storage.</p>`);
+ openSheet(`<h2>Состояние уведомлений</h2><p>База данных доступна.</p><p>${age<180000?'Планировщик работает.':'Давно не было успешного запуска планировщика. Проверь cron.'}</p><div class="kv"><span>Последний запуск</span><b>${last?escapeHtml(new Date(last).toLocaleString('ru-RU')):'Нет данных'}</b></div><div class="kv"><span>Ожидают отправки</span><b>${r.queue.pending}</b></div><div class="kv"><span>Ошибки доставки</span><b>${r.queue.dead}</b></div><div class="kv"><span>Просрочены</span><b>${r.queue.expired}</b></div><p class="mut">Проверка не отправляет сообщения и не подтверждает исправность Storage.</p>`);
 });}
 async function auditSheet(before=null,previous=[]){await mutation(async()=>{
  const r=await api('audit',null,before?{before}:{}),items=[...previous,...r.items];window.auditItems=items;window.auditNext=r.next;

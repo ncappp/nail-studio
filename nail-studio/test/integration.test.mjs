@@ -10,7 +10,7 @@ pg.Pool=class {async connect(){const release=await acquire();return {query,relea
 process.env.DATABASE_URL='test';process.env.ADMIN_TELEGRAM_ID='999';process.env.APP_URL='https://example.com';process.env.BOT_TOKEN='123:test';process.env.SUPABASE_URL='https://example.supabase.co';
 const {createBooking,getView,saveConfig,updateBooking,getAudit,diagnostics,exportData,findBookingRequest}=await import('../lib/service.js');
 const {db,readState}=await import('../lib/db.js');
-const {drain,telegram}=await import('../lib/notifications.js');
+const {drain,telegram,cleanup}=await import('../lib/notifications.js');
 const {default:handler}=await import('../api/index.js');
 const date=new Date(Date.now()+4*86400000).toISOString().slice(0,10);
 const input=(time='10:00')=>({date,time,name:'Аня <script>alert(1)</script>',phone:'+79001112233',serviceId:1,requestId:randomUUID()});
@@ -70,4 +70,15 @@ test('conflicting breaks and buffer changes roll back, audit and diagnostics rem
  assert.equal((await getAudit(admin)).items.length>0,true);
  assert.equal((await diagnostics(admin)).database,true);
  assert.ok((await exportData(admin)).bookings.length>0);
+});
+test('delivery diagnostics distinguish obsolete jobs, failures and expiration after cleanup',async()=>{
+ const admin={id:999},before=(await diagnostics(admin)).queue;
+ for(const [dead,error,expired] of [[true,null,false],[true,'superseded',false],[true,'400',false],[true,'expired',true],[false,null,true]]){
+  await query("INSERT INTO private.outbox(dedupe,chat_id,payload,due_at,expires_at,dead,last_error) VALUES($1,999,'{}',now(),$2,$3,$4)",[randomUUID(),expired?new Date(Date.now()-60000):null,dead,error]);
+ }
+ const first=(await diagnostics(admin)).queue;
+ assert.equal(first.dead,before.dead+1);assert.equal(first.expired,before.expired+2);
+ await cleanup();
+ const after=(await diagnostics(admin)).queue;
+ assert.equal(after.dead,first.dead);assert.equal(after.expired,first.expired);
 });
