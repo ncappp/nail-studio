@@ -77,7 +77,16 @@ try{
  await page.locator('#nbN').fill('Мария');await page.locator('#nbP').fill('+79002223344');await page.getByRole('button',{name:'Записать',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.bookings.filter(b=>b.status==='new').length,1);
  await page.locator('.bk').filter({hasText:'Мария'}).click();
  for(const [name,status] of [['Пришла','done'],['Не пришла','noshow'],['Ожидается','new']]){await page.locator('.stb').getByRole('button',{name,exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.bookings.find(b=>b.manual).status,status);assert.equal(await page.locator('#apanel .bk').filter({hasText:'Мария'}).count(),status==='new'?1:0);}
- await page.locator('.stb').getByRole('button',{name:'Пришла',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});await page.keyboard.press('Escape');await page.locator('.chip').filter({hasText:'Прошедшие'}).click();await page.locator('.bk').filter({hasText:'Мария'}).click();await page.locator('.stb').getByRole('button',{name:'Ожидается',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});await page.keyboard.press('Escape');await page.locator('.chip').filter({hasText:'Предстоящие'}).click();assert.equal(await page.locator('#apanel .bk').filter({hasText:'Мария'}).count(),1);
+ await page.locator('.stb').getByRole('button',{name:'Пришла',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});await page.keyboard.press('Escape');await page.locator('.tb').filter({hasText:'Финансы'}).click();
+ assert.equal(await page.locator('.finance-periods .on').innerText(),'Всё время');
+ const arrivedPrice=state.bookings.find(b=>b.manual).price;
+ assert.equal(await page.locator('#financeRevenue').innerText(),arrivedPrice.toLocaleString('ru-RU')+' ₽');
+ await page.screenshot({path:'test-output/finance-all-time.png',fullPage:true,animations:'disabled'});
+ await page.locator('.finance-periods').getByRole('button',{name:'Неделя',exact:true}).click();assert.equal(await page.locator('#financeRevenue').innerText(),'0 ₽');
+ await page.getByRole('button',{name:'Показать весь доход',exact:true}).click();assert.equal(await page.locator('#financeRevenue').innerText(),arrivedPrice.toLocaleString('ru-RU')+' ₽');
+ await page.reload();await page.locator('#loading').waitFor({state:'hidden'});await page.locator('#admBtn').click();await page.locator('.tb').filter({hasText:'Финансы'}).click();assert.equal(await page.locator('#financeRevenue').innerText(),arrivedPrice.toLocaleString('ru-RU')+' ₽');
+ await page.locator('.tb').filter({hasText:'Записи'}).click();await page.locator('.chip').filter({hasText:'Прошедшие'}).click();await page.locator('.bk').filter({hasText:'Мария'}).click();await page.locator('.stb').getByRole('button',{name:'Ожидается',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});await page.keyboard.press('Escape');await page.locator('.chip').filter({hasText:'Предстоящие'}).click();assert.equal(await page.locator('#apanel .bk').filter({hasText:'Мария'}).count(),1);
+ await page.locator('.tb').filter({hasText:'Финансы'}).click();assert.equal(await page.locator('#financeRevenue').innerText(),'0 ₽');
  assert.equal(await page.locator('img[onerror]').count(),0);assert.deepEqual(errors,[]);
  // Real button handlers: manual contact phone fallback, verified username,
  // profile contact, and self-record feedback (no broken deep-link navigation).
@@ -112,6 +121,17 @@ try{
 
  const extraDay=DateTime.fromISO(day).plus({days:1}).toISODate();state.slots[extraDay]=['10:00','12:00','14:00','16:00','18:00'];version++;
  await page.reload();await page.locator('#loading').waitFor({state:'hidden'});await page.locator('#admBtn').click();
+ await page.evaluate(()=>bookSheet());
+ await page.locator('#nbClient').selectOption(String(other.id));assert.equal(await page.locator('#nbN').inputValue(),other.name);assert.equal(await page.locator('#nbP').inputValue(),other.phone);
+ await page.locator('#nbClient').selectOption('');assert.equal(await page.locator('#nbN').inputValue(),'');assert.equal(await page.locator('#nbP').inputValue(),'');
+ await page.locator('#nbClient').selectOption(String(other.id));await page.getByRole('button',{name:'Сбросить выбор клиентки',exact:true}).click();assert.equal(await page.locator('#nbN').inputValue(),'');assert.equal(await page.locator('#nbP').inputValue(),'');
+ await page.locator('#nbClient').selectOption(String(other.id));await page.locator('#nbP').fill('@new_contact');assert.equal(await page.locator('#nbClient').inputValue(),'');assert.equal(await page.locator('#nbN').inputValue(),'');assert.equal(await page.locator('#nbP').inputValue(),'@new_contact');
+ await page.locator('#nbClient').selectOption(String(other.id));await page.locator('#nbN').fill('Новая клиентка');assert.equal(await page.locator('#nbClient').inputValue(),'');assert.equal(await page.locator('#nbP').inputValue(),'');
+ await page.locator('#nbP').fill('@new_contact');await page.locator('#nbD').selectOption(extraDay);await page.locator('#nbT').selectOption('10:00');
+ for(const id of ['nbClient','nbS','nbD','nbT'])assert.equal(await page.locator('#'+id).evaluate(e=>getComputedStyle(e).appearance),'none');
+ await page.screenshot({path:'test-output/manual-booking.png',animations:'disabled'});
+ await page.getByRole('button',{name:'Записать',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});
+ const unlinked=state.bookings.find(b=>b.date===extraDay&&b.time==='10:00');assert.equal(unlinked.tgId,null);assert.equal(unlinked.name,'Новая клиентка');assert.equal(unlinked.phone,'@new_contact');
  await page.evaluate(()=>bookSheet());await page.locator('#nbClient').selectOption(String(other.id));await page.locator('#nbD').selectOption(extraDay);await page.locator('#nbT').selectOption('16:00');
  await page.getByRole('button',{name:'Записать',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});
  assert.equal(state.bookings.find(b=>b.date===extraDay&&b.time==='16:00').tgId,456);
@@ -128,6 +148,7 @@ try{
 
  // Recover a committed booking whose HTTP response was lost. Choosing a new
  // time first must show the saved booking, not create a second reservation.
+ const recoveryDay=DateTime.fromISO(extraDay).plus({days:7}).toISODate();state.slots[recoveryDay]=['10:00','12:00'];version++;
  admin=false;await page.reload();await page.locator('#loading').waitFor({state:'hidden'});const countBefore=state.bookings.length;
  await page.locator('#mainBtn').click();await page.locator('.d').last().click();await page.locator('.tm').filter({hasText:'10:00'}).click();await page.locator('#mainBtn').click();await page.locator('.sc').first().click();await page.locator('#mainBtn').click();await page.locator('#cName').fill('Анна');await page.locator('#cPhone').fill('@recover_me');
  loseNextBookingReply=true;await page.locator('#mainBtn').click();await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.bookings.length,countBefore+1);
