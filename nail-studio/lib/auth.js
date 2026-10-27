@@ -18,4 +18,4 @@ export function authenticate(raw,token,now=Math.floor(Date.now()/1000)) {
 }
 export const isAdmin=u=>String(u?.id)===process.env.ADMIN_TELEGRAM_ID && /^[1-9]\d*$/.test(process.env.ADMIN_TELEGRAM_ID||'');
 export function requireAdmin(u){if(!isAdmin(u))throw new HttpError(403,'Доступ только для мастера');}
-export function checkSecret(actual,expected){if(!expected||typeof actual!=='string'||actual.length!==expected.length||!timingSafeEqual(Buffer.from(actual),Buffer.from(expected)))throw new HttpError(401,'Нет доступа');}
+export function checkSecret(actual,expected){if(typeof expected!=='string'||!expected||typeof actual!=='string')throw new HttpError(401,'Нет доступа');const a=Buffer.from(actual),b=Buffer.from(expected);if(a.length!==b.length||!timingSafeEqual(a,b))throw new HttpError(401,'Нет доступа');}

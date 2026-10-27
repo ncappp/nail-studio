@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "^22.0.0 || ^24.0.0"
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
@@ -12,7 +12,9 @@
     "migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
     "bot:setup": "node --env-file-if-exists=.env scripts/setup-bot.mjs",
     "build": "node scripts/build.mjs",
-    "test:ui": "node test/ui.mjs"
+    "test:ui": "node test/ui.mjs",
+    "test:postgres": "node test/postgres.mjs",
+    "check:config": "node --env-file-if-exists=.env scripts/check-config.mjs"
   },
   "dependencies": {
     "grammy": "^1.38.3",
@@ -22,7 +24,6 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.10",
-    "@sparticuz/chromium": "^153.0.0",
     "playwright": "^1.64.1"
   }
 }

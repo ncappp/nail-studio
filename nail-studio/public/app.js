@@ -1,7 +1,7 @@
 
 const IMGS=["/work-0.jpg", "/work-1.jpg", "/work-2.jpg", "/work-3.jpg", "/work-4.jpg", "/work-5.jpg"];
 const tg=window.Telegram?.WebApp;try{tg.ready();tg.expand();tg.setHeaderColor('#FFF4F6');tg.setBackgroundColor('#FFF4F6')}catch(e){}
-const KEY='nails_v4',fmt=n=>Math.round(n).toLocaleString('ru-RU')+' ₽';
+const fmt=n=>Math.round(n).toLocaleString('ru-RU')+' ₽';
 const iso=d=>DT.fromJSDate(new Date(d),{zone:DB.settings.timezone}).toISODate(),today=()=>DT.now().setZone(DB.settings.timezone).toISODate();
 const addDays=(s,n)=>DT.fromISO(s,{zone:DB.settings.timezone}).plus({days:n}).toISODate();
 const $=id=>document.getElementById(id);
@@ -32,26 +32,29 @@ let DB={studio:'Nail Studio',services:[],slots:{},bookings:[],expenses:[],cats:[
 let SESSION=null,VERSION=0,working=false;
 const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const DT=luxon.DateTime;
-async function api(action,body){
- const r=await fetch('/api/index?action='+action,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(45000)});
- const result=await r.json();if(!r.ok)throw new Error(result.error||'Не удалось выполнить действие');return result;
+async function api(action,body,query={}){
+ const r=await fetch('/api/index?'+new URLSearchParams({action,...query}),{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(45000)});
+ const result=await r.json();if(!r.ok){const e=new Error(result.error||'Не удалось выполнить действие');e.status=r.status;if(r.status===401){$('loadingText').textContent='Сессия истекла. Закрой и заново открой приложение через Telegram.';$('loading').hidden=false;$('retry').hidden=true;}throw e;}return result;
 }
-async function refresh(){const r=await api('state');DB=r.data;VERSION=r.version;SESSION=r;return r;}
+async function refresh(){const r=await api('state');DB=r.data;DB.blocks??=[];VERSION=r.version;SESSION=r;return r;}
 function lock(on){working=on;$('networkBusy').hidden=!on;}
 async function mutation(fn){if(working)return false;lock(true);try{await fn();return true;}catch(e){alert(e.message);try{await refresh();closeSheet();if(screen==='form')screen='date';go(screen);}catch{}return false;}finally{lock(false);}}
 function save(){
- const {bookings,busy,...config}=structuredClone(DB);
+ const {bookings,busy,historyNext,...config}=structuredClone(DB);
  return mutation(async()=>{const result=await api('save',{version:VERSION,config});VERSION=result.version;});
 }
 const photos=()=>DB.photos.length?DB.photos:IMGS;
 const pimg=s=>photos()[s.img%photos().length];
 let B={},screen='home';
-function go(s){if(s==='admin'&&!SESSION?.admin)return;screen=s;document.body.classList.toggle('adm-on',s==='admin');if(window.closeSheet)closeSheet();document.querySelectorAll('.screen').forEach(e=>e.classList.toggle('on',e.id==='s-'+s));render();scrollTo({top:0});haptic()}
+function go(s){if(s==='admin'&&!SESSION?.admin)return;screen=s;document.body.classList.toggle('adm-on',s==='admin');if(window.closeSheet)closeSheet();document.querySelectorAll('.screen').forEach(e=>e.classList.toggle('on',e.id==='s-'+s));render();syncTelegramNavigation();scrollTo({top:0});haptic()}
 function cta(text,fn,{show=true,sub='',disabled=false}={}){$('sticky').style.display=show?'block':'none';$('mainBtn').innerHTML=text+(sub?`<span class="sub">${sub}</span>`:'');$('mainBtn').onclick=fn;$('mainBtn').disabled=disabled}
 function available(d,t,dur,ignore=null){
  const start=DT.fromISO(d+'T'+t,{zone:DB.settings.timezone}).toMillis(),end=start+dur*60000;
  const busy=SESSION?.admin?DB.bookings.filter(b=>b.status!=='cancel'):DB.busy||[];
- return (DB.slots[d]||[]).includes(t)&&start>Date.now()&&end<=DT.fromISO(d+'T'+DB.settings.dayEnd,{zone:DB.settings.timezone}).toMillis()&&!busy.some(b=>b.id!==ignore&&start<b.endMs&&end>b.startMs);
+ const buffer=(DB.settings.bufferMinutes||0)*60000;
+ return (DB.slots[d]||[]).includes(t)&&start>Date.now()&&end<=DT.fromISO(d+'T'+DB.settings.dayEnd,{zone:DB.settings.timezone}).toMillis()
+  &&!DB.blocks.some(b=>b.date===d&&start<DT.fromISO(d+'T'+b.end,{zone:DB.settings.timezone}).toMillis()&&end>DT.fromISO(d+'T'+b.start,{zone:DB.settings.timezone}).toMillis())
+  &&!busy.some(b=>b.id!==ignore&&start<b.endMs+buffer&&end+buffer>b.startMs);
 }
 function freeTimes(d,dur=null,ignore=null){const lengths=dur?[dur]:DB.services.map(s=>s.dur);return (DB.slots[d]||[]).filter(t=>lengths.some(n=>available(d,t,n,ignore)));}
 const rel=d=>d===today()?'Сегодня':d===addDays(today(),1)?'Завтра':new Date(d+'T12:00:00').toLocaleDateString('ru',{day:'numeric',month:'short'});
@@ -96,15 +99,20 @@ function renderForm(){
  $('summary').innerHTML=`<div class="top"><img src="${pimg(s)}"><div><b>${escapeHtml(s.name)}</b><span>${B.date}, ${B.time}</span></div></div><div class="rw"><span>Длительность</span><b>${s.dur} мин</b></div><div class="rw"><span>Адрес</span><b>${escapeHtml(DB.settings.address)}</b></div><div class="rw tot"><span>К оплате</span><b>${fmt(s.price)}</b></div>`;
  cta('Подтвердить запись',async()=>{
   const name=$('cName').value.trim(),phone=$('cPhone').value.trim();if(!name||!phone)return alert('Укажи имя и номер телефона или Telegram');
-  B.requestId??=crypto.randomUUID();
-  await mutation(async()=>{const b=await api('book',{date:B.date,time:B.time,serviceId:s.id,name,phone,requestId:B.requestId});
-   $('okText').textContent=`${b.date}, ${b.time} · ${escapeHtml(b.service)}. Запись сохранена. Напоминания придут в Telegram, если ты разрешила сообщения боту.`;await refresh().catch(()=>{});B={};go('ok');confetti();haptic('success');});
+  const payload={date:B.date,time:B.time,serviceId:s.id,name,phone},key=JSON.stringify(payload);
+  await mutation(async()=>{
+   if(B.pending&&B.pending!==key){
+    try{const previous=await api('booking-request',null,{requestId:B.requestId});await bookingSuccess(previous);return;}catch(e){if(e.status!==404)throw e;}
+    B.requestId=null;
+   }
+   B.requestId??=crypto.randomUUID();B.pending=key;
+   try{await bookingSuccess(await api('book',{...payload,requestId:B.requestId}));}catch(e){if([400,403,409,429].includes(e.status)){B.requestId=null;B.pending=null;}throw e;}
+  });
  },{sub:'Оплата на месте · отмена и перенос за 12 часов'});
 }
+async function bookingSuccess(b){$('okText').textContent=`${b.date}, ${b.time} · ${b.service}. ${b.status==='cancel'?'Запись отменена.':'Запись сохранена. Уведомление придёт в Telegram в течение минуты, если сообщения бота разрешены.'}`;await refresh().catch(()=>{});B={};go('ok');confetti();haptic('success');}
 function confetti(){const c=['#EE6F93','#FFD3DF','#FFB8A6','#fff','#F7C6D9'];for(let i=0;i<40;i++){const p=document.createElement('div');p.className='conf';p.style.left=Math.random()*100+'vw';p.style.background=c[i%5];p.style.width=p.style.height=(6+Math.random()*8)+'px';p.style.setProperty('--dx',(Math.random()*160-80)+'px');p.style.animationDuration=(2.5+Math.random()*2.5)+'s';p.style.animationDelay=Math.random()*.8+'s';document.body.appendChild(p);setTimeout(()=>p.remove(),7000)}}
 /* ===================== ADMIN ===================== */
-// В боевой версии: доступ только для ADMIN_IDS, проверка initData на сервере
-const ADMIN_IDS=[];
 const SVG=p=>`<svg viewBox="0 0 24 24">${p}</svg>`;
 const IC={
  today:SVG('<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>'),
@@ -177,14 +185,16 @@ function bookInfo(id){
   <div class="kv"><span>Дата</span><b>${dfmt(b.date,{weekday:'short',day:'numeric',month:'long'})}, ${b.time}</b></div><div class="kv"><span>Услуга</span><b>${escapeHtml(b.service)}</b></div><div class="kv"><span>Стоимость</span><b>${fmt(b.price)}</b></div><div class="kv"><span>Контакт</span><b>${b.phone}</b></div>
   <label style="margin-top:16px">Статус</label><div class="stb">${Object.entries(ST).map(([k,v])=>`<button class="${b.status===k?'on':''}" style="color:${v[1]};background:${v[2]}" onclick="setSt(${b.id},'${k}')">${v[0]}</button>`).join('')}</div>
   <div class="btns">${isPhoneContact(b.phone)?`<a class="btn light" href="tel:${b.phone}">Позвонить</a>`:''}${telegramContactUrl(b)?`<button class="btn light" onclick="contactTelegram(${b.id})">Telegram</button>`:''}<button class="btn light" onclick="clientInfo('${b.phone}')">Карточка</button></div>
-  <button class="btn red" style="margin-top:8px" onclick="if(confirm('Удалить запись?')){removeBooking(${b.id})}">Удалить запись</button>`);
+  ${b.status==='new'?`<button class="btn pk" style="margin-top:8px" onclick="moveSheet(${b.id},true)">Перенести визит</button>`:''}
+  <button class="btn red" style="margin-top:8px" ${b.status!=='cancel'?'disabled':''} onclick="if(confirm('Удалить запись?')){removeBooking(${b.id})}">Удалить запись</button>`);
 }
 async function setSt(id,status){await mutation(async()=>{await api('change',{id,action:'status',status});await refresh();render();bookInfo(id);haptic('success');});}
 async function removeBooking(id){await mutation(async()=>{await api('delete',{id});await refresh();closeSheet();render();});}
 let manualRequestId=null;
 function bookSheet(){manualRequestId=crypto.randomUUID();
   const days=Object.keys(DB.slots).filter(d=>d>=today()&&freeTimes(d).length).sort();
-  openSheet(`<h2>Новая запись</h2><label>Клиентка</label><input id="nbN" placeholder="Имя" list="cl"><datalist id="cl">${clients().map(c=>`<option value="${escapeHtml(c.name)}">`).join('')}</datalist><label for="nbP">Телефон или Telegram</label><input id="nbP" placeholder="Номер телефона или @username" type="text" autocapitalize="off" spellcheck="false" maxlength="200">
+  const linked=[...new Map(DB.bookings.filter(b=>b.tgId).map(b=>[b.tgId,b])).values()];
+  openSheet(`<h2>Новая запись</h2><label for="nbClient">Клиентка из приложения</label><select id="nbClient" onchange="selectManualClient()"><option value="">Новая клиентка / только контакт</option>${linked.map(b=>`<option value="${b.id}">${escapeHtml(b.name)} · ${escapeHtml(b.phone)}</option>`).join('')}</select><p class="mut" id="nbNotice">Без привязки к аккаунту уведомления клиентке не отправятся.</p><label for="nbN">Имя</label><input id="nbN" placeholder="Имя" list="cl"><datalist id="cl">${clients().map(c=>`<option value="${escapeHtml(c.name)}">`).join('')}</datalist><label for="nbP">Телефон или Telegram</label><input id="nbP" placeholder="Номер телефона или @username" type="text" autocapitalize="off" spellcheck="false" maxlength="200" oninput="document.getElementById('nbClient').value='';selectManualClient()">
   <label>Услуга</label><select id="nbS" onchange="nbTimes()">${DB.services.map(s=>`<option value="${s.id}">${escapeHtml(s.name)} — ${fmt(s.price)}</option>`).join('')}</select>
   <label>Когда</label><div class="flex"><select id="nbD" onchange="nbTimes()">${days.map(d=>`<option value="${d}">${dfmt(d,{weekday:'short',day:'numeric',month:'short'})}</option>`).join('')}</select><select id="nbT"></select></div>
   ${days.length?'':'<p class="mut">Нет свободных окошек — сначала добавьте их во вкладке «Окошки»</p>'}
@@ -192,7 +202,8 @@ function bookSheet(){manualRequestId=crypto.randomUUID();
   $('nbN').oninput=()=>{const c=clients().find(x=>x.name===$('nbN').value);if(c)$('nbP').value=c.phone};nbTimes();
 }
 function nbTimes(){const d=$('nbD')?.value,s=svcBy(+$('nbS').value);$('nbT').innerHTML=d?freeTimes(d,s.dur).map(t=>`<option>${t}</option>`).join(''):'';}
-async function addBook(){const name=$('nbN').value.trim(),phone=$('nbP').value.trim(),date=$('nbD').value,time=$('nbT').value,serviceId=+$('nbS').value;await mutation(async()=>{await api('book',{name,phone,date,time,serviceId,manual:true,requestId:manualRequestId});await refresh().catch(()=>{});closeSheet();atab='book';bf='up';render();haptic('success');});}
+function selectManualClient(){const b=DB.bookings.find(b=>b.id===+$('nbClient').value);if(b){$('nbN').value=b.name;$('nbP').value=b.phone;}$('nbNotice').textContent=b?'Визит появится у клиентки, уведомления придут в её Telegram.':'Без привязки к аккаунту уведомления клиентке не отправятся.';}
+async function addBook(){const name=$('nbN').value.trim(),phone=$('nbP').value.trim(),date=$('nbD').value,time=$('nbT').value,serviceId=+$('nbS').value,clientBookingId=+$('nbClient').value||null;await mutation(async()=>{await api('book',{name,phone,date,time,serviceId,clientBookingId,manual:true,requestId:manualRequestId});await refresh().catch(()=>{});closeSheet();atab='book';bf='up';render();haptic('success');});}
 /* ---- Окошки ---- */
 function aSlots(P){
   const t=today();if(!calM)calM=t.slice(0,7);if(!calD)calD=t;
@@ -209,6 +220,7 @@ function aSlots(P){
   <div class="legend"><span>Открыто для записи</span><span class="b">Занято</span><span class="o">Закрыто</span></div>
   <div class="btns"><button class="btn light" onclick="fillDay()">Весь день</button><button class="btn light" onclick="clearDay()">Выходной</button></div>
   <button class="btn" style="margin-top:8px" onclick="repeatWeeks()">Повторить этот день на 4 недели</button>
+  <button class="btn light" style="margin-top:8px" onclick="blocksSheet()">Перерывы и отпуск</button>
   <p class="mut" style="margin:10px 4px">Нажмите на время, чтобы открыть или закрыть окошко. Клиентки видят только открытые.</p>`;
 }
 function calShift(n){const [y,m]=calM.split('-').map(Number),d=new Date(y,m-1+n,1);calM=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');render()}
@@ -273,9 +285,15 @@ function openSettings(){openSheet(`<h2>Настройки</h2>
   <div class="mrow" onclick="svcSheet()"><div class="ic2">${IC.tag}</div>Услуги и цены<span>${DB.services.length} →</span></div>
   <div class="mrow" onclick="photoSheet()"><div class="ic2">${IC.img}</div>Фото работ<span>${DB.photos.length||'демо'} →</span></div>
   <div class="mrow" onclick="catSheet()"><div class="ic2">${IC.money}</div>Категории расходов<span>${DB.cats.length} →</span></div>
+  <div class="mrow" onclick="blocksSheet()">Перерывы и отпуск<span>→</span></div>
+  <div class="mrow" onclick="exportSheet()">Экспорт данных<span>→</span></div>
+  <div class="mrow" onclick="auditSheet()">Журнал изменений<span>→</span></div>
+  <div class="mrow" onclick="diagnosticsSheet()">Состояние уведомлений<span>→</span></div>
   <label style="margin-top:16px">Студия</label><input value="${escapeHtml(DB.studio)}" placeholder="Название" onchange="DB.studio=this.value;save()"><input value="${escapeHtml(DB.settings.address)}" placeholder="Адрес" onchange="DB.settings.address=this.value;save()"><input value="${escapeHtml(DB.settings.hours)}" placeholder="Часы работы" onchange="DB.settings.hours=this.value;save()">
   <label>Шаблон рабочего дня</label><input value="${DB.settings.tpl.join(', ')}" onchange="DB.settings.tpl=this.value.split(/[ ,;]+/).filter(x=>/^\\d{1,2}:\\d{2}$/.test(x)).map(x=>x.padStart(5,'0')).sort();save()"><p class="mut" style="margin:-4px 4px 12px">Эти часы подставляются кнопкой «Весь день» в окошках</p>
-  <label>Часовой пояс</label><input value="${escapeHtml(DB.settings.timezone)}" onchange="DB.settings.timezone=this.value;save()"><label>Конец рабочего дня</label><input type="time" value="${DB.settings.dayEnd}" onchange="DB.settings.dayEnd=this.value;save()"><p class="mut">Последняя услуга должна закончиться до этого времени. Перерывы учитывай при открытии окошек.</p>`)}
+  <label>Часовой пояс</label><input value="${escapeHtml(DB.settings.timezone)}" onchange="DB.settings.timezone=this.value;save()"><label>Конец рабочего дня</label><input type="time" value="${DB.settings.dayEnd}" onchange="DB.settings.dayEnd=this.value;save()">
+  <label for="bufferMinutes">Буфер между визитами, мин</label><input id="bufferMinutes" type="number" min="0" max="120" value="${DB.settings.bufferMinutes||0}" onchange="DB.settings.bufferMinutes=+this.value;save()">
+  <label for="masterContact">Контакт мастера</label><input id="masterContact" placeholder="@username или +79001234567" value="${escapeHtml(DB.settings.masterContact||'')}" onchange="DB.settings.masterContact=this.value.trim();save()"><p class="mut">Клиентка сможет связаться с тобой, если отмена через приложение уже закрыта.</p>`)}
 function svcSheet(){openSheet(`<h2>Услуги и цены</h2>${DB.services.map(s=>`<div class="svr"><img src="${pimg(s)}" onclick="upd(${s.id},'img',${s.img+1});svcSheet()" title="Сменить фото"><div class="f"><input value="${escapeHtml(s.name)}" onchange="upd(${s.id},'name',this.value)"><input type="number" value="${s.price}" onchange="upd(${s.id},'price',+this.value)" placeholder="Цена"><input type="number" value="${s.dur}" onchange="upd(${s.id},'dur',+this.value)" placeholder="Мин"></div><div class="x"><button onclick="upd(${s.id},'popular',${!s.popular});svcSheet()" style="color:${s.popular?'#F2A33A':''}">★</button><button onclick="if(confirm('Удалить услугу?')){DB.services=DB.services.filter(x=>x.id!==${s.id});save();svcSheet()}">×</button></div></div>`).join('')}
   <p class="mut" style="margin:4px 4px 10px">Цена · длительность в минутах · ★ показывать на главной · нажмите на фото, чтобы сменить</p><button class="btn pk" onclick="DB.services.push({id:Date.now(),name:'Новая услуга',price:1000,dur:60,img:0});save();svcSheet()">+ Добавить услугу</button>`)}
 function photoSheet(){openSheet(`<h2>Фото работ</h2><p class="mut" style="margin-bottom:10px">${DB.photos.length?'Первое фото — главное на экране клиента':'Сейчас показаны демо-фото. Загрузите свои — они заменят демо.'}</p><div class="ph">${DB.photos.map((p,i)=>`<div><img src="${p}"><button onclick="DB.photos.splice(${i},1);save();photoSheet()">×</button></div>`).join('')}</div>
@@ -291,20 +309,21 @@ async function upPhotos(files){
  });
 }
 function upd(id,k,v){DB.services.find(s=>s.id===id)[k]=v;save()}
-function openSheet(h){$('sheetC').innerHTML=h;$('sheet').scrollTop=0;$('sheet').classList.add('on');$('sbg').classList.add('on');haptic()}
-function closeSheet(){$('sheet').classList.remove('on');$('sbg').classList.remove('on')}
+function openSheet(h){$('sheetC').innerHTML=h;$('sheet').scrollTop=0;$('sheet').classList.add('on');$('sheet').setAttribute('aria-hidden','false');$('sheet').inert=false;$('sbg').classList.add('on');syncTelegramNavigation();haptic()}
+function closeSheet(){$('sheet').classList.remove('on');$('sheet').setAttribute('aria-hidden','true');$('sheet').inert=true;$('sbg').classList.remove('on');syncTelegramNavigation()}
 function toggleAdmin(){go(screen==='admin'?'home':'admin');$('admBtn').textContent=screen==='admin'?'клиент':'admin'}
 function render(){({home:renderHome,date:renderDate,svc:renderSvc,form:renderForm,ok:()=>cta('На главную',()=>go('home')),admin:renderAdmin})[screen]()}
 
 function showMine(){
  if(!SESSION)return;
  const list=DB.bookings.filter(b=>b.tgId===SESSION.user.id).sort((a,b)=>b.startMs-a.startMs);
- openSheet(`<h2>Мои записи</h2><p class="mut">Время студии: ${escapeHtml(DB.settings.timezone)}. Отмена и перенос — за 12 часов до визита.</p>${list.map(b=>`<div class="card"><b>${b.date}, ${b.time}</b><p>${escapeHtml(b.service)} · ${fmt(b.price)}</p>${pill(b.status)}${b.status==='new'&&b.startMs-Date.now()>=43200000?`<div class="btns"><button class="btn light" onclick="moveSheet(${b.id})">Перенести</button><button class="btn red" onclick="cancelMine(${b.id})">Отменить</button></div>`:''}</div>`).join('')||'<p>Пока нет записей</p>'}`);
+ openSheet(`<h2>Мои записи</h2><p class="mut">Время студии: ${escapeHtml(DB.settings.timezone)}. Отмена и перенос — за 12 часов до визита.</p>${list.map(b=>`<div class="card"><b>${b.date}, ${b.time}</b><p>${escapeHtml(b.service)} · ${fmt(b.price)}</p>${pill(b.status)}${b.status==='new'&&b.startMs-Date.now()>=43200000?`<div class="btns"><button class="btn light" onclick="moveSheet(${b.id})">Перенести</button><button class="btn red" onclick="cancelMine(${b.id})">Отменить</button></div>`:b.status==='new'?`<p class="mut">Для изменения визита свяжись с мастером.</p>${masterContactButton()}`:''}</div>`).join('')||'<p>Пока нет записей</p>'}${DB.historyNext?'<button class="btn light" onclick="loadHistory()">Показать ещё</button>':''}`);
 }
 async function cancelMine(id){if(!confirm('Отменить запись?'))return;await mutation(async()=>{await api('change',{id,action:'cancel'});await refresh();showMine();});}
-function moveSheet(id){const b=DB.bookings.find(b=>b.id===id);const days=Object.keys(DB.slots).filter(d=>freeTimes(d,b.dur,b.id).length).sort();openSheet(`<h2>Перенести запись</h2><select id="moveDay" onchange="moveTimes(${id})">${days.map(d=>`<option>${d}</option>`).join('')}</select><select id="moveTime"></select><button class="btn pk" onclick="submitMove(${id})">Подтвердить перенос</button>`);moveTimes(id);}
-function moveTimes(id){const b=DB.bookings.find(b=>b.id===id);$('moveTime').innerHTML=freeTimes($('moveDay').value,b.dur,b.id).map(t=>`<option>${t}</option>`).join('');}
-async function submitMove(id){const date=$('moveDay').value,time=$('moveTime').value;await mutation(async()=>{await api('change',{id,action:'reschedule',date,time});await refresh();showMine();});}
+let movingAsAdmin=false;
+function moveSheet(id,admin=false){movingAsAdmin=admin;const b=DB.bookings.find(b=>b.id===id);const days=Object.keys(DB.slots).filter(d=>freeTimes(d,b.dur,b.id).length).sort();openSheet(`<h2>Перенести запись</h2><label for="moveDay">Дата</label><select id="moveDay" onchange="moveTimes(${id})">${days.map(d=>`<option>${d}</option>`).join('')}</select><label for="moveTime">Время</label><select id="moveTime"></select><button class="btn pk" ${days.length?'':'disabled'} onclick="submitMove(${id})">Подтвердить перенос</button>${days.length?'':'<p>Свободных окошек нет</p>'}`);moveTimes(id);}
+function moveTimes(id){const b=DB.bookings.find(b=>b.id===id),day=$('moveDay').value;$('moveTime').innerHTML=day?freeTimes(day,b.dur,b.id).map(t=>`<option>${t}</option>`).join(''):'';}
+async function submitMove(id){const date=$('moveDay').value,time=$('moveTime').value,admin=movingAsAdmin;await mutation(async()=>{await api('change',{id,action:'reschedule',date,time});await refresh();if(admin){render();bookInfo(id);}else showMine();});}
 async function boot(){
  try{await refresh();$('admBtn').hidden=!SESSION.admin;$('loading').hidden=true;
  const h=location.hash.slice(1);go(h.startsWith('admin')&&SESSION.admin?'admin':'home');if(h==='mine')showMine();

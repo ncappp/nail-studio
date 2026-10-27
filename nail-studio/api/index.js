@@ -1,15 +1,16 @@
 import { authenticate,requireAdmin,checkSecret,HttpError } from '../lib/auth.js';
-import { getView,createBooking,updateBooking,saveConfig,deleteBooking } from '../lib/service.js';
-import { drain,queue } from '../lib/notifications.js';
+import { getView,createBooking,updateBooking,saveConfig,deleteBooking,getHistory,getAudit,exportData,diagnostics,findBookingRequest } from '../lib/service.js';
+import { drain,queue,cleanup } from '../lib/notifications.js';
 import { transaction } from '../lib/db.js';
 import { z } from 'zod';
 export const config={maxDuration:60};
 export default async function handler(req,res){
+ const requestId=crypto.randomUUID();res.setHeader('X-Request-Id',requestId);
  res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
  try{
   const url=new URL(req.url,'https://local'),action=url.searchParams.get('action')||req.query?.action;
   if(action==='health'){res.status(200).json({ok:true});return;}
-  if(action==='cron'){if(req.method!=='POST'&&req.method!=='GET')throw new HttpError(405,'Метод не поддерживается');checkSecret(req.headers.authorization,`Bearer ${process.env.CRON_SECRET||''}`);if(!process.env.CRON_SECRET)throw new HttpError(503,'Cron не настроен');return res.status(200).json(await drain(25));}
+  if(action==='cron'){if(req.method!=='POST'&&req.method!=='GET')throw new HttpError(405,'Метод не поддерживается');checkSecret(req.headers.authorization,`Bearer ${process.env.CRON_SECRET||''}`);if(!process.env.CRON_SECRET)throw new HttpError(503,'Cron не настроен');const result=await drain(25);await cleanup();return res.status(200).json(result);}
   if(action==='webhook'){
    if(req.method!=='POST')throw new HttpError(405,'Метод не поддерживается');checkSecret(req.headers['x-telegram-bot-api-secret-token'],process.env.TELEGRAM_WEBHOOK_SECRET);
    const update=req.body,updateId=z.number().int().parse(update?.update_id);
@@ -24,11 +25,16 @@ export default async function handler(req,res){
   }
   const user=authenticate(req.headers['x-telegram-init-data'],process.env.BOT_TOKEN);
   if(action==='state'&&req.method==='GET')return res.status(200).json(await getView(user));
+  if(action==='booking-request'&&req.method==='GET')return res.status(200).json(await findBookingRequest(user,url.searchParams.get('requestId')));
+  if(action==='history'&&req.method==='GET'){const cursor=url.searchParams.has('beforeMs')?[z.coerce.number().finite().parse(url.searchParams.get('beforeMs')),z.coerce.number().int().positive().parse(url.searchParams.get('beforeId'))]:null;return res.status(200).json(await getHistory(user,cursor));}
+  if(action==='audit'&&req.method==='GET')return res.status(200).json(await getAudit(user,url.searchParams.get('before')));
+  if(action==='export'&&req.method==='GET')return res.status(200).json(await exportData(user));
+  if(action==='diagnostics'&&req.method==='GET')return res.status(200).json(await diagnostics(user));
   if(req.method!=='POST')throw new HttpError(405,'Метод не поддерживается');
   const body=req.body||{};
   if(action==='save'){const r=await saveConfig(user,body);return res.status(200).json(r);}
-  if(action==='book'){const r=await createBooking(user,body);try{await drain(4);}catch{console.error('outbox delayed');}return res.status(200).json(r);}
-  if(action==='change'){const r=await updateBooking(user,body);try{await drain(4);}catch{console.error('outbox delayed');}return res.status(200).json(r);}
+  if(action==='book')return res.status(200).json(await createBooking(user,body));
+  if(action==='change')return res.status(200).json(await updateBooking(user,body));
   if(action==='delete')return res.status(200).json(await deleteBooking(user,z.number().int().positive().parse(body.id)));
   if(action==='upload'){
    requireAdmin(user);
@@ -40,5 +46,5 @@ export default async function handler(req,res){
    if(!r.ok)throw new HttpError(502,'Не удалось загрузить фото');return res.status(200).json({url:`${root}/storage/v1/object/public/works/${path}`});
   }
   throw new HttpError(404,'Не найдено');
- }catch(e){const status=e instanceof z.ZodError?400:e.status||500;if(status===500)console.error('API error',e.code||e.name);res.status(status).json({error:e instanceof z.ZodError?'Проверь поля: '+e.issues.map(i=>i.path[0]==='phone'?'номер телефона или Telegram в формате @username':i.path.join('.')).join(', '):status===500?'Сервис временно недоступен. Попробуй ещё раз':e.message});}
+ }catch(e){const status=e instanceof z.ZodError?400:e.status||500;if(status===500)console.error('API error',{requestId,code:e.code||e.name});res.status(status).json({requestId,error:e instanceof z.ZodError?'Проверь поля: '+e.issues.map(i=>i.path[0]==='phone'?'номер телефона или Telegram в формате @username':i.path.join('.')).join(', '):status===500?'Сервис временно недоступен. Попробуй ещё раз':e.message});}
 }
