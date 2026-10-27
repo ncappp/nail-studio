@@ -8,13 +8,13 @@ const query=async(sql,params=[])=>{const r=await engine.query(sql,params);return
 // transaction boundaries intact; hosted multi-connection behavior is a deployment gate.
 pg.Pool=class {async connect(){const release=await acquire();return {query,release};}async query(...a){const c=await this.connect();try{return await c.query(...a);}finally{c.release();}}};
 process.env.DATABASE_URL='test';process.env.ADMIN_TELEGRAM_ID='999';process.env.APP_URL='https://example.com';process.env.BOT_TOKEN='123:test';process.env.SUPABASE_URL='https://example.supabase.co';
-const {createBooking,getView,saveConfig,updateBooking}=await import('../lib/service.js');
+const {createBooking,getView,saveConfig,updateBooking,getAudit,diagnostics,exportData,findBookingRequest}=await import('../lib/service.js');
 const {db,readState}=await import('../lib/db.js');
 const {drain,telegram}=await import('../lib/notifications.js');
 const {default:handler}=await import('../api/index.js');
 const date=new Date(Date.now()+4*86400000).toISOString().slice(0,10);
 const input=(time='10:00')=>({date,time,name:'Аня <script>alert(1)</script>',phone:'+79001112233',serviceId:1,requestId:randomUUID()});
-before(async()=>{await engine.exec(await readFile(new URL('../sql/001_init.sql',import.meta.url),'utf8'));const s=emptyState();s.services=[{id:1,name:'Гель',price:1500,dur:150,img:0,popular:true}];s.slots[date]=['10:00','12:00','12:30'];await query('INSERT INTO private.studio(id,data) VALUES(1,$1)',[JSON.stringify(s)]);});
+before(async()=>{await engine.exec(await readFile(new URL('../sql/001_init.sql',import.meta.url),'utf8'));await engine.exec(await readFile(new URL('../sql/004_operations.sql',import.meta.url),'utf8'));const s=emptyState();s.services=[{id:1,name:'Гель',price:1500,dur:150,img:0,popular:true}];s.slots[date]=['10:00','12:00','12:30'];await query('INSERT INTO private.studio(id,data) VALUES(1,$1)',[JSON.stringify(s)]);});
 after(async()=>engine.close());
 test('transactional booking, concurrency, privacy and outbox lifecycle',async()=>{
  const results=await Promise.allSettled(Array.from({length:8},(_,i)=>createBooking({id:100+i},input())));
@@ -49,4 +49,25 @@ test('API denies missing auth, forged admin and cron/webhook secrets',async()=>{
  assert.equal((await call('webhook','POST')).code,401);
  assert.equal((await call('cron')).code,401);
  const view=await call('state','GET',{'x-telegram-init-data':sign(123)});assert.equal(view.code,200);assert.equal(view.body.admin,false);assert.deepEqual(view.body.data.notes,{});
+ for(const action of ['export','audit','diagnostics'])assert.equal((await call(action,'GET',{'x-telegram-init-data':sign(123)})).code,403);
+});
+test('manual linking queues client delivery and request lookup is scoped to its creator',async()=>{
+ const original=(await readState()).data.bookings.find(b=>b.status==='new');
+ const b=await createBooking({id:999},{...input('12:30'),manual:true,clientBookingId:original.id});
+ assert.equal(b.tgId,original.tgId);
+ const jobs=await query('SELECT * FROM private.outbox WHERE booking_id=$1 AND chat_id=$2',[b.id,b.tgId]);assert.equal(jobs.rows.length,3);
+ assert.equal((await findBookingRequest({id:999},b.requestId)).id,b.id);
+ await assert.rejects(()=>findBookingRequest({id:777},b.requestId),e=>e.status===404);
+});
+test('conflicting breaks and buffer changes roll back, audit and diagnostics remain admin-only',async()=>{
+ const admin={id:999},{data,version}=await getView(admin),{bookings,...config}=data;
+ config.blocks=[{id:1,date,start:'11:00',end:'11:30',note:'private'}];
+ const before=(await query('SELECT * FROM private.audit_log')).rows.length;
+ await assert.rejects(()=>saveConfig(admin,{version,config}),e=>e.status===409);
+ assert.equal((await query('SELECT * FROM private.audit_log')).rows.length,before);
+ config.blocks=[];config.settings.bufferMinutes=15;
+ await assert.rejects(()=>saveConfig(admin,{version,config}),e=>e.status===409);
+ assert.equal((await getAudit(admin)).items.length>0,true);
+ assert.equal((await diagnostics(admin)).database,true);
+ assert.ok((await exportData(admin)).bookings.length>0);
 });

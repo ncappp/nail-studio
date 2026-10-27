@@ -1,28 +1,21 @@
 {
-  "name": "pearl-nail-studio",
-  "version": "5.0.0",
+  "name": "nail-studio-repository",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "nail-studio"
+  ],
   "engines": {
-    "node": ">=22"
+    "node": "^22.0.0 || ^24.0.0"
   },
   "scripts": {
-    "dev": "node --env-file-if-exists=.env scripts/dev.mjs",
-    "test": "node --test test/*.test.mjs",
-    "migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
-    "bot:setup": "node --env-file-if-exists=.env scripts/setup-bot.mjs",
-    "build": "node scripts/build.mjs",
-    "test:ui": "node test/ui.mjs"
-  },
-  "dependencies": {
-    "grammy": "^1.38.3",
-    "luxon": "^3.7.2",
-    "pg": "^8.16.3",
-    "zod": "^4.1.12"
-  },
-  "devDependencies": {
-    "@electric-sql/pglite": "^0.5.10",
-    "@sparticuz/chromium": "^153.0.0",
-    "playwright": "^1.64.1"
+    "dev": "npm run dev --workspace pearl-nail-studio --",
+    "test": "npm run test --workspace pearl-nail-studio --",
+    "migrate": "npm run migrate --workspace pearl-nail-studio --",
+    "bot:setup": "npm run bot:setup --workspace pearl-nail-studio --",
+    "build": "npm run build --workspace pearl-nail-studio --",
+    "test:ui": "npm run test:ui --workspace pearl-nail-studio --",
+    "test:postgres": "npm run test:postgres --workspace pearl-nail-studio --",
+    "check:config": "npm run check:config --workspace pearl-nail-studio --"
   }
 }

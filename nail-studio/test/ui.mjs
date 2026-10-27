@@ -1,17 +1,16 @@
 import { chromium } from 'playwright';
-import bundled from '@sparticuz/chromium';
 import { spawn } from 'node:child_process';
 import { readFile,mkdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { DateTime } from 'luxon';
 import { emptyState,clientView,reserve,changeBooking,configSchema } from '../lib/model.js';
-const server=spawn(process.execPath,['scripts/dev.mjs'],{cwd:process.cwd(),env:{...process.env,PORT:'3099'},stdio:'pipe'});
+const server=spawn(process.execPath,['scripts/dev.mjs'],{cwd:process.cwd(),env:{...process.env,PORT:'3099',NODE_ENV:'test'},stdio:'pipe'});
 await new Promise((resolve,reject)=>{server.stdout.on('data',d=>{if(String(d).includes('localhost:3099'))resolve();});server.on('exit',c=>reject(new Error('Dev server exited '+c)));});
 let browser;
 try{
- browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||await bundled.executablePath(),args:bundled.args,headless:true});
+ browser=await chromium.launch({...(process.env.CHROMIUM_PATH?{executablePath:process.env.CHROMIUM_PATH}:{}),...(process.platform==='darwin'?{args:['--in-process-gpu']}:{}),headless:true});
  const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,deviceScaleFactor:1});
- const errors=[],actions=[];let admin=false,version=1;
+ const errors=[],actions=[];let admin=false,version=1,loseNextBookingReply=false;
  let state=emptyState();state.studio='Pearl';state.services=JSON.parse(await readFile('sql/catalog.json','utf8'));state.settings.address='Тестовый адрес';
  const day=DateTime.now().setZone('Europe/Samara').plus({days:4}).toISODate();state.slots[day]=['10:00','12:00','14:00','16:00','18:00'];
  const user={id:123,first_name:'Аня'};
@@ -24,10 +23,14 @@ try{
   try{
    const b=req.method()==='POST'?req.postDataJSON():{};
    if(action==='state')result={data:admin?state:clientView(state,user),version,admin,user};
-   else if(action==='book'){result=reserve(state,b,user,{admin:!!b.manual}).booking;version++;}
+   else if(action==='book'){result=reserve(state,b,user,{admin:!!b.manual}).booking;version++;if(loseNextBookingReply){loseNextBookingReply=false;return route.abort('failed');}}
+   else if(action==='booking-request'){result=state.bookings.find(b=>b.createdBy===user.id&&b.requestId===url.searchParams.get('requestId'));if(!result)return route.fulfill({status:404,json:{error:'Not found'}});}
    else if(action==='change'){result=changeBooking(state,b.id,b.action,b,user,{admin});version++;}
    else if(action==='save'){assert.equal(b.version,version);state={...configSchema.parse(b.config),bookings:state.bookings};result={version:++version};}
    else if(action==='upload')result={url:'https://test.supabase.co/storage/v1/object/public/works/test.jpg'};
+   else if(action==='export')result={bookings:state.bookings,expenses:state.expenses};
+   else if(action==='audit')result={items:[{id:1,actor_id:999,action:'booking.created',entity_id:'1',created_at:new Date().toISOString()}],next:null};
+   else if(action==='diagnostics')result={queue:{pending:0,dead:0,expired:0},worker:{finished_at:new Date().toISOString()}};
    else throw new Error('Unexpected action '+action);
    await route.fulfill({json:result});
   }catch(e){await route.fulfill({status:e.status||400,json:{error:e.message}});}
@@ -35,7 +38,7 @@ try{
  const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
  await page.goto('http://localhost:3099');await page.locator('#loading').waitFor({state:'hidden'});
  assert.equal(await page.locator('#admBtn').isVisible(),false);
- await mkdir('test-output',{recursive:true});await page.evaluate(()=>document.querySelectorAll('.reveal').forEach(e=>e.classList.add('in')));await page.screenshot({path:'test-output/home.png',fullPage:true});
+ await mkdir('test-output',{recursive:true});await page.evaluate(()=>document.querySelectorAll('.reveal').forEach(e=>e.classList.add('in')));await page.screenshot({path:'test-output/home.png',fullPage:true,animations:'disabled'});
  await page.locator('#mainBtn').click();await page.locator('.tm').first().click();await page.locator('#mainBtn').click();await page.locator('.sc').first().click();await page.locator('#mainBtn').click();
  await page.locator('#cName').fill('<img src=x onerror=alert(1)>');await page.locator('#cPhone').fill('+79001112233');await page.locator('#mainBtn').click();
  await page.locator('#s-ok.on').waitFor();assert.equal(state.bookings.length,1);
@@ -77,6 +80,36 @@ try{
  admin=true;await page.reload();await page.locator('#loading').waitFor({state:'hidden'});await page.locator('#admBtn').click();await page.evaluate(id=>bookInfo(id),tgOnly.id);
  assert.equal(await page.locator('#sheetC a[href^="tel:"]').count(),0);assert.ok((await page.locator('#sheetC').innerText()).includes('@telegram_only'));
  await page.evaluate(()=>clientInfo('@telegram_only'));await page.locator('#sheetC textarea').fill('Заметка для Telegram-клиентки');await page.locator('#sheetC textarea').press('Tab');await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.notes['@telegram_only'],'Заметка для Telegram-клиентки');assert.deepEqual(errors,[]);
- console.log('UI PASS: booking, move, cancel, admin tabs, expense, settings, photo upload, manual booking; Telegram contacts (phone, username, self), no JS errors or injected elements');
+
+ // Master rescheduling keeps the original client and authoritative price.
+ await page.evaluate(id=>bookInfo(id),other.id);await page.getByRole('button',{name:'Перенести визит',exact:true}).click();
+ await page.locator('#moveTime').selectOption('14:00');await page.getByRole('button',{name:'Подтвердить перенос'}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});
+ assert.equal(state.bookings.find(b=>b.id===other.id).time,'14:00');assert.ok((await page.locator('#sheetC').innerText()).includes('Клиентка'));
+
+ const extraDay=DateTime.fromISO(day).plus({days:1}).toISODate();state.slots[extraDay]=['10:00','12:00','14:00','16:00','18:00'];version++;
+ await page.reload();await page.locator('#loading').waitFor({state:'hidden'});await page.locator('#admBtn').click();
+ await page.evaluate(()=>bookSheet());await page.locator('#nbClient').selectOption(String(other.id));await page.locator('#nbD').selectOption(extraDay);await page.locator('#nbT').selectOption('16:00');
+ await page.getByRole('button',{name:'Записать',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});
+ assert.equal(state.bookings.find(b=>b.date===extraDay&&b.time==='16:00').tgId,456);
+
+ await page.getByRole('button',{name:'Настройки',exact:true}).click();await page.getByRole('button',{name:'Перерывы и отпуск →',exact:true}).click();
+ await page.locator('#blockFrom').fill(extraDay);await page.locator('#blockTo').fill(extraDay);await page.locator('#blockStart').fill('13:00');await page.locator('#blockEnd').fill('15:00');await page.locator('#blockNote').fill('Обед');
+ await page.getByRole('button',{name:'Добавить перерыв',exact:true}).click();await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.blocks.length,1);
+ await page.screenshot({path:'test-output/breaks.png',animations:'disabled'});
+ await page.keyboard.press('Escape');await page.getByRole('button',{name:'Настройки',exact:true}).click();
+ await page.locator('#bufferMinutes').fill('15');await page.locator('#bufferMinutes').press('Tab');await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.settings.bufferMinutes,15);
+ await page.locator('#masterContact').fill('@studio_master');await page.locator('#masterContact').press('Tab');await page.locator('#networkBusy').waitFor({state:'hidden'});
+ await page.getByRole('button',{name:'Экспорт данных →',exact:true}).click();const downloading=page.waitForEvent('download');await page.getByRole('button',{name:'Записи — CSV',exact:true}).click();const downloaded=await downloading;assert.ok(downloaded.suggestedFilename().endsWith('.csv'));
+ await page.locator('#networkBusy').waitFor({state:'hidden'});await page.keyboard.press('Escape');await page.getByRole('button',{name:'Настройки',exact:true}).click();await page.getByRole('button',{name:'Журнал изменений →',exact:true}).click();await page.getByText('Создана запись',{exact:true}).waitFor();
+ await page.locator('#networkBusy').waitFor({state:'hidden'});await page.keyboard.press('Escape');await page.getByRole('button',{name:'Настройки',exact:true}).click();await page.getByRole('button',{name:'Состояние уведомлений →',exact:true}).click();await page.getByText('Планировщик работает.',{exact:true}).waitFor();
+
+ // Recover a committed booking whose HTTP response was lost. Choosing a new
+ // time first must show the saved booking, not create a second reservation.
+ admin=false;await page.reload();await page.locator('#loading').waitFor({state:'hidden'});const countBefore=state.bookings.length;
+ await page.locator('#mainBtn').click();await page.locator('.d').last().click();await page.locator('.tm').filter({hasText:'10:00'}).click();await page.locator('#mainBtn').click();await page.locator('.sc').first().click();await page.locator('#mainBtn').click();await page.locator('#cPhone').fill('@recover_me');
+ loseNextBookingReply=true;await page.locator('#mainBtn').click();await page.locator('#networkBusy').waitFor({state:'hidden'});assert.equal(state.bookings.length,countBefore+1);
+ await page.locator('.d').last().click();await page.locator('.tm').filter({hasText:'12:00'}).click();await page.locator('#mainBtn').click();await page.locator('.sc').first().click();await page.locator('#mainBtn').click();await page.locator('#mainBtn').click();await page.locator('#s-ok.on').waitFor();
+ assert.equal(state.bookings.length,countBefore+1);assert.ok((await page.locator('#okText').innerText()).includes('10:00'));assert.deepEqual(errors,[]);
+ console.log('UI PASS: booking recovery, client/master move, cancel, linked manual booking, breaks, buffer, export, audit, diagnostics, contacts, accessibility; no JS errors');
  console.log('Actions:',actions.join(', '));
 }finally{await browser?.close();server.kill();}
