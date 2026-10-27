@@ -129,12 +129,12 @@ const IC={
 const ATABS=[['today','Сегодня'],['book','Записи'],['slots','Окошки'],['fin','Финансы'],['clients','Клиенты']];
 const ST={new:['Ожидается','#EE6F93','rgba(238,111,147,.13)'],done:['Пришла','#2F9C5E','#E4F6EC'],noshow:['Не пришла','#B07A1E','#FFF0D6'],cancel:['Отмена','#7D6A71','#EEE8EA']};
 const CCOL=['#EE6F93','#FFB8A6','#231A1E','#B9A3F0','#7FCBA4','#F2C46D','#A8949B','#8EC5F0'];
-let atab='today',period='week',bf='up',cseg='all',cq='',calM=null,calD=null;
+let atab='today',period='all',bf='up',cseg='all',cq='',calM=null,calD=null;
 const svcBy=id=>DB.services.find(s=>s.id===id)||{name:'—',price:0,dur:60,img:0};
 const ini=n=>escapeHtml((n||'?').trim()[0].toUpperCase());
 const dfmt=(d,o={day:'numeric',month:'long'})=>new Date(d+'T12:00:00').toLocaleDateString('ru',o);
 function pill(st){const s=ST[st]||ST.new;return `<span class="pill" style="color:${s[1]};background:${s[2]}">${s[0]}</span>`}
-function range(p,shift=0){const len=p==='day'?1:p==='week'?7:30,end=addDays(today(),-len*shift),start=addDays(end,-(len-1));return [start,end,len]}
+function range(p,shift=0){if(p==='all')return shift?['','',0]:['0001-01-01','9999-12-31',0];const len=p==='day'?1:p==='week'?7:30,end=addDays(today(),-len*shift),start=addDays(end,-(len-1));return [start,end,len]}
 const inR=(d,[s,e])=>d>=s&&d<=e;
 function delta(a,b){if(!b)return '';const v=Math.round((a-b)/Math.abs(b)*100);return `<span class="dl ${v>=0?'up':'dn'}">${v>=0?'↑':'↓'} ${Math.abs(v)}%</span>`}
 function stats(r){const bs=DB.bookings.filter(b=>inR(b.date,r)),done=bs.filter(b=>b.status==='done'),rev=done.reduce((a,b)=>a+b.price,0),ex=DB.expenses.filter(e=>inR(e.date,r)),exp=ex.reduce((a,e)=>a+e.amount,0);return {bs,done,rev,exp,ex,profit:rev-exp,clients:new Set(done.map(b=>b.phone)).size,noshow:bs.filter(b=>b.status==='noshow').length}}
@@ -183,7 +183,7 @@ function bookInfo(id){
   openSheet(`<div style="display:flex;gap:12px;align-items:center;margin-bottom:14px"><div class="av" style="width:52px;height:52px;font-size:18px">${ini(b.name)}</div><div><h2 style="margin:0">${escapeHtml(b.name)}</h2><span class="ctag ${ctag(c)[1]}" style="margin:0">${ctag(c)[0]}</span> <span class="mut">визитов: ${c.visits}</span></div></div>
   <div class="kv"><span>Дата</span><b>${dfmt(b.date,{weekday:'short',day:'numeric',month:'long'})}, ${b.time}</b></div><div class="kv"><span>Услуга</span><b>${escapeHtml(b.service)}</b></div><div class="kv"><span>Стоимость</span><b>${fmt(b.price)}</b></div><div class="kv"><span>Контакт</span><b>${b.phone}</b></div>
   <label style="margin-top:16px">Статус</label><div class="stb">${Object.entries(ST).map(([k,v])=>`<button class="${b.status===k?'on':''}" style="color:${v[1]};background:${v[2]}" onclick="setSt(${b.id},'${k}')">${v[0]}</button>`).join('')}</div>
-  <p class="mut status-help">Мастер может менять статус в любое время. «Пришла» учитывается в доходах.</p>
+  <p class="mut status-help">Мастер может менять статус в любое время. «Пришла» учитывается в доходах по дате визита. Все отмеченные визиты видны в финансах за всё время.</p>
   <div class="btns">${isPhoneContact(b.phone)?`<a class="btn light" href="tel:${b.phone}">Позвонить</a>`:''}${telegramContactUrl(b)?`<button class="btn light" onclick="contactTelegram(${b.id})">Telegram</button>`:''}<button class="btn light" onclick="clientInfo('${b.phone}')">Карточка</button></div>
   ${b.status==='new'?`<button class="btn pk" style="margin-top:8px" onclick="moveSheet(${b.id},true)">Перенести визит</button>`:''}
   <button class="btn red" style="margin-top:8px" onclick="confirmDeleteBooking(${b.id})">Удалить запись</button>`);
@@ -195,15 +195,18 @@ let manualRequestId=null;
 function bookSheet(){manualRequestId=crypto.randomUUID();
   const days=Object.keys(DB.slots).filter(d=>d>=today()&&freeTimes(d).length).sort();
   const linked=[...new Map(DB.bookings.filter(b=>b.tgId).map(b=>[b.tgId,b])).values()];
-  openSheet(`<h2>Новая запись</h2><label for="nbClient">Клиентка из приложения</label><select id="nbClient" onchange="selectManualClient()"><option value="">Новая клиентка / только контакт</option>${linked.map(b=>`<option value="${b.id}">${escapeHtml(b.name)} · ${escapeHtml(b.phone)}</option>`).join('')}</select><p class="mut" id="nbNotice">Без привязки к аккаунту уведомления клиентке не отправятся.</p><label for="nbN">Имя</label><input id="nbN" placeholder="Имя" list="cl"><datalist id="cl">${clients().map(c=>`<option value="${escapeHtml(c.name)}">`).join('')}</datalist><label for="nbP">Телефон или Telegram</label><input id="nbP" placeholder="Номер телефона или @username" type="text" autocapitalize="off" spellcheck="false" maxlength="200" oninput="document.getElementById('nbClient').value='';selectManualClient()">
+  openSheet(`<h2>Новая запись</h2><label for="nbClient">Клиентка из приложения</label><select id="nbClient" onchange="selectManualClient()"><option value="">Новая клиентка / только контакт</option>${linked.map(b=>`<option value="${b.id}">${escapeHtml(b.name)} · ${escapeHtml(b.phone)}</option>`).join('')}</select><button type="button" id="nbReset" class="time-link manual-reset" hidden onclick="resetManualClient()">Сбросить выбор клиентки</button><p class="mut" id="nbNotice">Без привязки к аккаунту уведомления клиентке не отправятся.</p><label for="nbN">Имя</label><input id="nbN" placeholder="Имя" oninput="detachManualClient('name')"><label for="nbP">Телефон или Telegram</label><input id="nbP" placeholder="Номер телефона или @username" type="text" autocapitalize="off" spellcheck="false" maxlength="200" oninput="detachManualClient('contact')">
   <label>Услуга</label><select id="nbS" onchange="nbTimes()">${DB.services.map(s=>`<option value="${s.id}">${escapeHtml(s.name)} — ${fmt(s.price)}</option>`).join('')}</select>
   <label>Когда</label><div class="flex"><select id="nbD" onchange="nbTimes()">${days.map(d=>`<option value="${d}">${dfmt(d,{weekday:'short',day:'numeric',month:'short'})}</option>`).join('')}</select><select id="nbT"></select></div>
   ${days.length?'':'<p class="mut">Нет свободных окошек — сначала добавьте их во вкладке «Окошки»</p>'}
   <button class="btn pk" style="margin-top:8px" onclick="addBook()">Записать</button>`);
-  $('nbN').oninput=()=>{const c=clients().find(x=>x.name===$('nbN').value);if(c)$('nbP').value=c.phone};nbTimes();
+  nbTimes();
 }
 function nbTimes(){const d=$('nbD')?.value,s=svcBy(+$('nbS').value);$('nbT').innerHTML=d?freeTimes(d,s.dur).map(t=>`<option>${t}</option>`).join(''):'';}
-function selectManualClient(){const b=DB.bookings.find(b=>b.id===+$('nbClient').value);if(b){$('nbN').value=b.name;$('nbP').value=b.phone;}$('nbNotice').textContent=b?'Визит появится у клиентки, уведомления придут в её Telegram.':'Без привязки к аккаунту уведомления клиентке не отправятся.';}
+function manualClientNotice(linked){$('nbReset').hidden=!linked;$('nbNotice').textContent=linked?'Визит появится у клиентки, уведомления придут в её Telegram.':'Без привязки к аккаунту уведомления клиентке не отправятся.';}
+function selectManualClient(){const b=DB.bookings.find(b=>b.id===+$('nbClient').value);$('nbN').value=b?.name||'';$('nbP').value=b?.phone||'';manualClientNotice(!!b);}
+function resetManualClient(){$('nbClient').value='';selectManualClient();$('nbN').focus();}
+function detachManualClient(field){if($('nbClient').value){$('nbClient').value='';$(field==='name'?'nbP':'nbN').value='';}manualClientNotice(false);}
 async function addBook(){const name=$('nbN').value.trim(),phone=$('nbP').value.trim(),date=$('nbD').value,time=$('nbT').value,serviceId=+$('nbS').value,clientBookingId=+$('nbClient').value||null;await mutation(async()=>{await api('book',{name,phone,date,time,serviceId,clientBookingId,manual:true,requestId:manualRequestId});await refresh().catch(()=>{});closeSheet();atab='book';bf='up';render();haptic('success');});}
 /* ---- Окошки ---- */
 function aSlots(P){
@@ -233,14 +236,17 @@ function addCustomTime(){openTimeEditor('slot',calD||today());}
 /* ---- Финансы ---- */
 function aFin(P){
   const r=range(period),pr=range(period,1),S=stats(r),Sp=stats(pr);
+  const outside=DB.bookings.filter(b=>b.status==='done'&&!inR(b.date,r));
   const days=[...Array(r[2])].map((_,i)=>addDays(r[0],i)),per=days.map(d=>S.done.filter(b=>b.date===d).reduce((a,b)=>a+b.price,0)),mx=Math.max(1,...per);
   const byC={};S.ex.forEach(e=>byC[e.cat]=(byC[e.cat]||0)+e.amount);const cs=Object.entries(byC).sort((a,b)=>b[1]-a[1]);let acc=0;
   const grad=cs.length?cs.map(([k,v],i)=>{const a=acc;acc+=v/S.exp*100;return `${CCOL[Math.max(0,DB.cats.indexOf(k))%CCOL.length]} ${a}% ${acc}%`}).join(','):'rgba(35,26,30,.08) 0 100%';
   const top={};S.done.forEach(b=>top[b.service]=(top[b.service]||0)+b.price);const tm=Math.max(1,...Object.values(top));
   const fv=firstVisit(),uniq=[...new Set(S.done.map(b=>b.phone))],nw=uniq.filter(p=>inR(fv[p],r)).length;
-  P.innerHTML=`<div class="seg">${[['day','День'],['week','Неделя'],['month','Месяц']].map(([k,v])=>`<div class="${period===k?'on':''}" onclick="period='${k}';render()">${v}</div>`).join('')}</div>
-  <div class="kpis"><div class="kpi dk span">Чистая прибыль<b style="font-size:32px">${fmt(S.profit)}${delta(S.profit,Sp.profit)}</b><div style="margin-top:4px;font-size:11.5px;opacity:.7">${dfmt(r[0],{day:'numeric',month:'short'})}${r[2]>1?' — '+dfmt(r[1],{day:'numeric',month:'short'}):''} · к прошлому периоду</div></div>
-  <div class="kpi pk">Доход<b>${fmt(S.rev)}</b></div><div class="kpi">Расходы<b>${fmt(S.exp)}</b></div></div>
+  P.innerHTML=`<div class="seg finance-periods">${[['all','Всё время'],['day','День'],['week','Неделя'],['month','Месяц']].map(([k,v])=>`<div class="${period===k?'on':''}" onclick="period='${k}';render()">${v}</div>`).join('')}</div>
+  <div class="kpis"><div class="kpi dk span">Чистая прибыль<b style="font-size:32px">${fmt(S.profit)}${delta(S.profit,Sp.profit)}</b><div style="margin-top:4px;font-size:11.5px;opacity:.7">${period==='all'?'Все отмеченные визиты и расходы':dfmt(r[0],{day:'numeric',month:'short'})+(r[2]>1?' — '+dfmt(r[1],{day:'numeric',month:'short'}):'')+' · к прошлому периоду'}</div></div>
+  <div class="kpi pk">Доход<b id="financeRevenue">${fmt(S.rev)}</b></div><div class="kpi">Расходы<b>${fmt(S.exp)}</b></div></div>
+  <p class="mut finance-help">Доход учитывается по дате визита для записей со статусом «Пришла». ${period==='all'?'Здесь видны и уже отмеченные визиты на будущие даты.':''}</p>
+  ${outside.length?`<div class="card finance-outside"><p>За выбранный период показана часть дохода. Отмеченных визитов вне периода: ${outside.length}.</p><button type="button" class="btn light" onclick="period='all';render()">Показать весь доход</button></div>`:''}
   ${r[2]>1?`<div class="card"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600"><span>Доход по дням</span><span class="mut">макс. ${fmt(mx)}</span></div><div class="bars">${per.map((v,i)=>`<i class="${v?'':'z'}" style="height:${v?Math.max(4,v/mx*100):3}%;animation-delay:${i*15}ms" title="${fmt(v)}"></i>`).join('')}</div><div class="bx-l"><span>${dfmt(r[0],{day:'numeric',month:'short'})}</span><span>${dfmt(r[1],{day:'numeric',month:'short'})}</span></div></div>`:''}
   <div class="h3">Клиенты</div><div class="kpis"><div class="kpi">Клиенток<b>${uniq.length}${delta(uniq.length,new Set(Sp.done.map(b=>b.phone)).size)}</b></div><div class="kpi">Визитов<b>${S.done.length}</b></div><div class="kpi">Новые<b>${nw}</b></div><div class="kpi">Вернулись<b>${uniq.length-nw}</b></div><div class="kpi">Средний чек<b>${fmt(S.done.length?S.rev/S.done.length:0)}</b></div><div class="kpi">Не пришли<b>${S.bs.length?Math.round(S.noshow/S.bs.length*100):0}%</b></div></div>
   <div class="h3">Что приносит деньги</div><div class="card">${Object.entries(top).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`<div class="hb"><div class="l"><span>${escapeHtml(k)}</span><b>${fmt(v)}</b></div><div class="bar"><i style="width:${v/tm*100}%"></i></div></div>`).join('')||'<div class="empty">Нет визитов за период</div>'}</div>
