@@ -35,7 +35,7 @@ export async function deleteBooking(user,id){
   if(!b)throw new HttpError(404,'Запись не найдена');
   if(b.status!=='cancel')throw new HttpError(409,'Сначала отмените запись');
   data.bookings=data.bookings.filter(x=>x.id!==id);await writeState(c,data);
-  await c.query('UPDATE private.outbox SET dead=true WHERE booking_id=$1 AND sent_at IS NULL',[id]);
+  await c.query("UPDATE private.outbox SET dead=true,last_error='superseded' WHERE booking_id=$1 AND sent_at IS NULL",[id]);
   await audit(c,user,'booking.deleted',id,b,null);return {ok:true};
  });
 }
@@ -69,8 +69,8 @@ export async function exportData(user){requireAdmin(user);const {data,version}=a
 export async function diagnostics(user){
  requireAdmin(user);await readState();
  const {rows}=await db().query(`SELECT count(*) FILTER (WHERE sent_at IS NULL AND NOT dead AND (expires_at IS NULL OR expires_at>now()))::int AS pending,
- count(*) FILTER (WHERE dead)::int AS dead,
- count(*) FILTER (WHERE sent_at IS NULL AND NOT dead AND expires_at<=now())::int AS expired,
+ count(*) FILTER (WHERE sent_at IS NULL AND dead AND last_error IS NOT NULL AND last_error NOT IN ('superseded','expired'))::int AS dead,
+ count(*) FILTER (WHERE sent_at IS NULL AND expires_at<=now() AND (NOT dead OR last_error='expired'))::int AS expired,
  min(due_at) FILTER (WHERE sent_at IS NULL AND NOT dead AND due_at<=now() AND (expires_at IS NULL OR expires_at>now())) AS oldest_due FROM private.outbox`);
  const worker=await db().query('SELECT finished_at,delivered FROM private.worker_status WHERE id=1');
  return {database:true,queue:rows[0],worker:worker.rows[0]||null,checkedAt:new Date().toISOString()};

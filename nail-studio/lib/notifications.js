@@ -5,7 +5,7 @@ export function telegram(){return bot??=new Bot(process.env.BOT_TOKEN);}
 const appButton=()=>({inline_keyboard:[[{text:'Мои записи · отмена / перенос',web_app:{url:process.env.APP_URL+'/#mine'}}]]});
 export async function queue(c,key,chat,payload,due=Date.now(),booking=null,expires=null){if(!chat)return;await c.query('INSERT INTO private.outbox(dedupe,chat_id,booking_id,revision,payload,due_at,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING',[key,chat,booking?.id??null,booking?.revision??null,payload,new Date(due),expires?new Date(expires):null]);}
 export async function bookingNotifications(c,b,kind,zone){
- await c.query('UPDATE private.outbox SET dead=true WHERE booking_id=$1 AND sent_at IS NULL',[b.id]);
+ await c.query("UPDATE private.outbox SET dead=true,last_error='superseded' WHERE booking_id=$1 AND sent_at IS NULL",[b.id]);
  const label=b.status==='cancel'?'Запись отменена':{created:'Новая запись',reschedule:'Запись перенесена',status:'Статус записи изменён'}[kind];
  const details=`${b.date}, ${b.time} (${zone})\n${b.service} · ${b.price} ₽`;
  await queue(c,`${b.id}:${b.revision}:admin`,process.env.ADMIN_TELEGRAM_ID,{text:`${label}\n${b.name} · ${b.phone}\n${details}\nСтатус: ${{new:'ожидается',done:'пришла',noshow:'не пришла',cancel:'отмена'}[b.status]}`,reply_markup:{inline_keyboard:[[{text:'Кабинет мастера',web_app:{url:process.env.APP_URL+'/#admin'}}]]}},Date.now(),b);
@@ -25,7 +25,7 @@ export async function drain(limit=20){
    const {rows}=await c.query('SELECT * FROM private.outbox WHERE id=$1 FOR UPDATE',[job.id]),current=rows[0];
    if(!current||current.dead||current.sent_at)return;
    if(current.expires_at&&new Date(current.expires_at).getTime()<=Date.now())return;
-   if(job.booking_id){const {data}=await readState(c),b=data.bookings.find(b=>b.id===Number(job.booking_id));if(!b||b.revision!==job.revision){await c.query('UPDATE private.outbox SET dead=true,lease_until=NULL WHERE id=$1',[job.id]);return;}}
+   if(job.booking_id){const {data}=await readState(c),b=data.bookings.find(b=>b.id===Number(job.booking_id));if(!b||b.revision!==job.revision){await c.query("UPDATE private.outbox SET dead=true,last_error='superseded',lease_until=NULL WHERE id=$1",[job.id]);return;}}
    const attempts=current.attempts+1;
    try{
     await telegram().api.sendMessage(job.chat_id,job.payload.text,{reply_markup:job.payload.reply_markup},AbortSignal.timeout(10000));
