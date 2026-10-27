@@ -172,7 +172,7 @@ function aToday(P){
 /* ---- Записи ---- */
 function aBook(P){
   const t=today(),n=nowT(),isPast=b=>b.date<t||(b.date===t&&b.time<n);
-  const F={up:['Предстоящие',b=>!isPast(b)&&b.status!=='cancel'],pend:['Отметить',b=>isPast(b)&&b.status==='new'],past:['Прошедшие',b=>isPast(b)],cancel:['Отмены',b=>b.status==='cancel'||b.status==='noshow'],all:['Все',()=>true]};
+  const F={up:['Предстоящие',b=>!isPast(b)&&b.status==='new'],pend:['Отметить',b=>isPast(b)&&b.status==='new'],past:['Прошедшие',b=>isPast(b)||b.status==='done'||b.status==='noshow'],cancel:['Отмены',b=>b.status==='cancel'||b.status==='noshow'],all:['Все',()=>true]};
   let list=DB.bookings.filter(F[bf][1]).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));if(bf!=='up')list.reverse();list=list.slice(0,80);
   const g={};list.forEach(b=>(g[b.date]=g[b.date]||[]).push(b));
   P.innerHTML=`<div class="chips">${Object.entries(F).map(([k,[v,f]])=>`<div class="chip ${bf===k?'on':''}" onclick="bf='${k}';render()">${v}<i>${DB.bookings.filter(f).length}</i></div>`).join('')}</div>`+
